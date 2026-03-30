@@ -73,6 +73,37 @@ export function useTransactions() {
     return data as Transaction
   }
 
+  const updateTransaction = async (
+    id: string,
+    updates: Partial<Transaction>
+  ) => {
+    const { error } = await supabase
+      .from('transactions')
+      .update(updates)
+      .eq('id', id)
+
+    if (error) {
+      console.error('Error updating transaction:', JSON.stringify(error))
+      return false
+    }
+    await fetchTransactions()
+    return true
+  }
+
+  const deleteTransaction = async (id: string) => {
+    const { error } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('id', id)
+
+    if (error) {
+      console.error('Error deleting transaction:', JSON.stringify(error))
+      return false
+    }
+    await fetchTransactions()
+    return true
+  }
+
   const daysSinceLastIncome = (() => {
     const lastIncome = transactions.find((t) => t.type === 'income')
     if (!lastIncome) return null
@@ -85,6 +116,8 @@ export function useTransactions() {
     loading,
     currentBalance,
     createTransaction,
+    updateTransaction,
+    deleteTransaction,
     daysSinceLastIncome,
     refetch: fetchTransactions,
   }

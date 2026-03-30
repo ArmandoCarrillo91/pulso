@@ -9,6 +9,8 @@ import { useTransactions } from '@/hooks/useTransactions'
 import { usePlans } from '@/hooks/usePlans'
 import { usePayday } from '@/hooks/usePayday'
 import TransactionModal from '@/components/modals/TransactionModal'
+import EditTransactionModal from '@/components/modals/EditTransactionModal'
+import type { Transaction } from '@/types'
 import Button from '@/components/ui/Button'
 import Chip from '@/components/ui/Chip'
 import ProgressBar from '@/components/ui/ProgressBar'
@@ -43,6 +45,7 @@ function formatTransactionDate(dateStr: string): string {
 
 export default function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   const [userName, setUserName] = useState('')
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
@@ -54,6 +57,8 @@ export default function HomePage() {
     loading,
     currentBalance,
     createTransaction,
+    updateTransaction,
+    deleteTransaction,
     daysSinceLastIncome,
   } = useTransactions()
   const { plans, totalSavingsPerFortnight } = usePlans()
@@ -122,7 +127,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen p-4 pb-20">
+    <div className="flex flex-col min-h-screen p-4 pb-24">
       {/* Top Bar */}
       <div className="flex items-center justify-between mb-8">
         {editingName ? (
@@ -197,10 +202,11 @@ export default function HomePage() {
           {transactions.map((t, i) => {
             const opacity = Math.max(1 - i * 0.12, 0.3)
             return (
-              <div
+              <button
                 key={t.id}
-                className="flex items-center justify-between p-3 rounded-btn bg-[var(--bg-secondary)]"
+                className="flex items-center justify-between p-3 rounded-btn bg-[var(--bg-secondary)] w-full text-left"
                 style={{ opacity }}
+                onClick={() => setEditingTransaction(t)}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-xl">
@@ -223,44 +229,53 @@ export default function HomePage() {
                     {formatTransactionDate(t.date)}
                   </span>
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
       </div>
 
-      {/* Bottom Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-40">
-        <div className="mx-auto max-w-app flex items-center justify-between px-6 py-4 bg-[var(--bg-card)] border-t border-[var(--border-color)]">
+      {/* Floating Bottom Pill */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4">
+        <div
+          className="mx-auto max-w-app flex items-center justify-between rounded-[20px] px-8 py-3 backdrop-blur-xl"
+          style={{
+            background: 'var(--pill-bg)',
+            border: '0.5px solid var(--pill-border)',
+          }}
+        >
           <Link
             href="/settings"
-            className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            className="flex flex-col items-center gap-1"
+            style={{ color: 'var(--pill-text)' }}
           >
             <svg
-              width="22"
-              height="22"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
+            <span className="text-[10px] font-medium">Ajustes</span>
           </Link>
           <button
             onClick={handleLogout}
-            className="p-2 text-[var(--text-secondary)] hover:text-negative transition-colors"
+            className="flex flex-col items-center gap-1"
+            style={{ color: 'var(--pill-text)' }}
           >
             <svg
-              width="22"
-              height="22"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
@@ -268,9 +283,18 @@ export default function HomePage() {
               <polyline points="16 17 21 12 16 7" />
               <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
+            <span className="text-[10px] font-medium">Salir</span>
           </button>
         </div>
       </div>
+
+      {/* Edit Transaction Modal */}
+      <EditTransactionModal
+        transaction={editingTransaction}
+        onClose={() => setEditingTransaction(null)}
+        onUpdate={updateTransaction}
+        onDelete={deleteTransaction}
+      />
 
       {/* Transaction Modal */}
       <TransactionModal

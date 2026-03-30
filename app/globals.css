@@ -11,6 +11,9 @@
     --text-secondary: #6b7280;
     --text-muted: #9ca3af;
     --border-color: #e5e7eb;
+    --pill-bg: rgba(0, 0, 0, 0.04);
+    --pill-border: rgba(0, 0, 0, 0.08);
+    --pill-text: rgba(17, 24, 39, 0.4);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -22,6 +25,9 @@
       --text-secondary: #9ca3af;
       --text-muted: #6b7280;
       --border-color: #2e2e2e;
+      --pill-bg: rgba(255, 255, 255, 0.04);
+      --pill-border: rgba(255, 255, 255, 0.08);
+      --pill-text: rgba(249, 250, 251, 0.4);
     }
   }
 

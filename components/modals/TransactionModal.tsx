@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
+import { getLocalDateString } from '@/lib/date'
 import {
   INCOME_CATEGORIES,
   EXPENSE_CATEGORIES,
@@ -47,6 +48,8 @@ export default function TransactionModal({
   const [categoryChanges, setCategoryChanges] = useState(0)
   const [date, setDate] = useState('')
 
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
+
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>([])
   const [showCustomForm, setShowCustomForm] = useState(false)
   const [customEmoji, setCustomEmoji] = useState('')
@@ -74,10 +77,23 @@ export default function TransactionModal({
       setCategoryChanges(0)
       prevCategoryRef.current = ''
       savedIdRef.current = null
-      setDate(new Date().toISOString().split('T')[0])
+      setDate(getLocalDateString())
       setShowCustomForm(false)
       setCustomEmoji('')
       setCustomName('')
+
+      const supabase = createClient()
+      supabase
+        .from('transactions')
+        .select('category_id, type')
+        .then(({ data }) => {
+          if (!data) return
+          const counts: Record<string, number> = {}
+          for (const row of data) {
+            counts[row.category_id] = (counts[row.category_id] || 0) + 1
+          }
+          setCategoryCounts(counts)
+        })
     }
   }, [isOpen])
 
@@ -135,7 +151,7 @@ export default function TransactionModal({
       // Geolocation unavailable or denied
     }
 
-    const selectedDate = date || now.toISOString().split('T')[0]
+    const selectedDate = date || getLocalDateString(now)
     const dateObj = new Date(selectedDate + 'T12:00:00')
 
     const transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id'> = {
@@ -192,7 +208,13 @@ export default function TransactionModal({
   const defaultCategories =
     type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
   const customForType = customCategories.filter((c) => c.type === type)
-  const categories = [...defaultCategories, ...customForType]
+  const allCategories = [...defaultCategories, ...customForType]
+
+  const used = allCategories
+    .filter((c) => (categoryCounts[c.id] || 0) > 0)
+    .sort((a, b) => (categoryCounts[b.id] || 0) - (categoryCounts[a.id] || 0))
+  const unused = allCategories.filter((c) => !categoryCounts[c.id])
+  const categories = [...used, ...unused]
 
   const totalSavings = plans.reduce(
     (sum, p) => sum + p.amount_per_fortnight,
@@ -350,7 +372,7 @@ export default function TransactionModal({
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              max={new Date().toISOString().split('T')[0]}
+              max={getLocalDateString()}
               className="input-field mb-6"
             />
             <div className="flex gap-3">
