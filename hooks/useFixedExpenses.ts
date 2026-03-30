@@ -16,7 +16,7 @@ export function useFixedExpenses() {
     if (!user) return
 
     const { data, error } = await supabase
-      .from('pulso_fixed_expenses')
+      .from('fixed_expenses')
       .select('*')
       .eq('user_id', user.id)
       .order('day_of_month', { ascending: true })
@@ -42,7 +42,7 @@ export function useFixedExpenses() {
     if (!user) return null
 
     const { data, error } = await supabase
-      .from('pulso_fixed_expenses')
+      .from('fixed_expenses')
       .insert({ ...expense, user_id: user.id })
       .select()
       .single()
@@ -60,7 +60,7 @@ export function useFixedExpenses() {
     updates: Partial<FixedExpense>
   ) => {
     const { error } = await supabase
-      .from('pulso_fixed_expenses')
+      .from('fixed_expenses')
       .update(updates)
       .eq('id', id)
     if (!error) await fetchExpenses()
@@ -68,7 +68,7 @@ export function useFixedExpenses() {
 
   const deleteExpense = async (id: string) => {
     const { error } = await supabase
-      .from('pulso_fixed_expenses')
+      .from('fixed_expenses')
       .delete()
       .eq('id', id)
     if (!error) await fetchExpenses()

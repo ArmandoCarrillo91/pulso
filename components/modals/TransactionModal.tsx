@@ -172,7 +172,7 @@ export default function TransactionModal({
     if (savedIdRef.current && rating > 0) {
       const supabase = createClient()
       const { error } = await supabase
-        .from('pulso_transactions')
+        .from('transactions')
         .update({ rating })
         .eq('id', savedIdRef.current)
       if (error) {

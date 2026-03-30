@@ -16,7 +16,7 @@ export function useTransactions() {
     if (!user) return
 
     const { data, error } = await supabase
-      .from('pulso_transactions')
+      .from('transactions')
       .select('*')
       .eq('user_id', user.id)
       .order('date', { ascending: false })
@@ -37,7 +37,7 @@ export function useTransactions() {
       .channel('transactions-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'pulso_transactions' },
+        { event: '*', schema: 'pulso', table: 'transactions' },
         () => fetchTransactions()
       )
       .subscribe()
@@ -61,7 +61,7 @@ export function useTransactions() {
     if (!user) return null
 
     const { data, error } = await supabase
-      .from('pulso_transactions')
+      .from('transactions')
       .insert({ ...transaction, user_id: user.id })
       .select()
       .single()

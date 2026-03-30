@@ -16,7 +16,7 @@ export function usePlans() {
     if (!user) return
 
     const { data, error } = await supabase
-      .from('pulso_plans')
+      .from('plans')
       .select('*')
       .eq('user_id', user.id)
       .order('priority', { ascending: true })
@@ -45,7 +45,7 @@ export function usePlans() {
     if (!user) return null
 
     const { data, error } = await supabase
-      .from('pulso_plans')
+      .from('plans')
       .insert({ ...plan, user_id: user.id })
       .select()
       .single()
@@ -59,12 +59,12 @@ export function usePlans() {
   }
 
   const updatePlan = async (id: string, updates: Partial<Plan>) => {
-    const { error } = await supabase.from('pulso_plans').update(updates).eq('id', id)
+    const { error } = await supabase.from('plans').update(updates).eq('id', id)
     if (!error) await fetchPlans()
   }
 
   const deletePlan = async (id: string) => {
-    const { error } = await supabase.from('pulso_plans').delete().eq('id', id)
+    const { error } = await supabase.from('plans').delete().eq('id', id)
     if (!error) await fetchPlans()
   }
 
@@ -72,7 +72,7 @@ export function usePlans() {
     setPlans(reordered)
     for (let i = 0; i < reordered.length; i++) {
       await supabase
-        .from('pulso_plans')
+        .from('plans')
         .update({ priority: i + 1 })
         .eq('id', reordered[i].id)
     }
