@@ -45,6 +45,7 @@ export default function TransactionModal({
   const [rating, setRating] = useState(0)
   const [saving, setSaving] = useState(false)
   const [categoryChanges, setCategoryChanges] = useState(0)
+  const [date, setDate] = useState('')
 
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>([])
   const [showCustomForm, setShowCustomForm] = useState(false)
@@ -73,6 +74,7 @@ export default function TransactionModal({
       setCategoryChanges(0)
       prevCategoryRef.current = ''
       savedIdRef.current = null
+      setDate(new Date().toISOString().split('T')[0])
       setShowCustomForm(false)
       setCustomEmoji('')
       setCustomName('')
@@ -133,6 +135,9 @@ export default function TransactionModal({
       // Geolocation unavailable or denied
     }
 
+    const selectedDate = date || now.toISOString().split('T')[0]
+    const dateObj = new Date(selectedDate + 'T12:00:00')
+
     const transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id'> = {
       type,
       category_id: categoryId,
@@ -140,10 +145,10 @@ export default function TransactionModal({
       amount: parsed,
       note: note.trim() || null,
       rating: null,
-      date: now.toISOString().split('T')[0],
-      weekday: now.getDay(),
+      date: selectedDate,
+      weekday: dateObj.getDay(),
       hour: now.getHours(),
-      is_weekend: now.getDay() === 0 || now.getDay() === 6,
+      is_weekend: dateObj.getDay() === 0 || dateObj.getDay() === 6,
       fortnight: currentFortnight,
       geo_lat: geoLat,
       geo_lng: geoLng,
@@ -336,6 +341,16 @@ export default function TransactionModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Nota (opcional)"
+              className="input-field mb-3"
+            />
+            <label className="block text-xs text-[var(--text-secondary)] mb-1">
+              Fecha
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              max={new Date().toISOString().split('T')[0]}
               className="input-field mb-6"
             />
             <div className="flex gap-3">
