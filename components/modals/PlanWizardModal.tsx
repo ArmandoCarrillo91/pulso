@@ -27,6 +27,7 @@ interface PlanWizardModalProps {
   currentBalance: number
   totalSavingsPerFortnight: number
   daysRemaining: number
+  nextPayday: Date
 }
 
 export default function PlanWizardModal({
@@ -36,6 +37,7 @@ export default function PlanWizardModal({
   currentBalance,
   totalSavingsPerFortnight,
   daysRemaining,
+  nextPayday,
 }: PlanWizardModalProps) {
   const [step, setStep] = useState(1)
   const [planType, setPlanType] = useState<PlanType>('meta')
@@ -110,7 +112,7 @@ export default function PlanWizardModal({
       time_unit: 'fortnights',
       priority: 999,
       plan_type: planType,
-      start_date: getLocalDateString(),
+      start_date: getLocalDateString(nextPayday),
       target_date: resolvedTargetDate || null,
       current_amount: 0,
       recurrence_month: planType === 'anual' ? recurrenceMonth : null,
@@ -344,6 +346,16 @@ export default function PlanWizardModal({
                 </div>
               </div>
             </div>
+
+            <p className="text-xs text-[var(--text-muted)] text-center mb-4">
+              Este plan empieza a descontar en tu próxima quincena:{' '}
+              <span className="font-semibold text-[var(--text-secondary)]">
+                {nextPayday.toLocaleDateString('es-MX', {
+                  day: 'numeric',
+                  month: 'short',
+                })}
+              </span>
+            </p>
 
             <div className="flex gap-3">
               <Button variant="secondary" onClick={() => setStep(2)}>

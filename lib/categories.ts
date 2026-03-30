@@ -2,17 +2,23 @@ export const INCOME_CATEGORIES = [
   { id: 'quincena', label: 'Quincena', emoji: '💼' },
   { id: 'bono', label: 'Bono', emoji: '🎯' },
   { id: 'freelance', label: 'Freelance', emoji: '⚡' },
-  { id: 'otro-ingreso', label: 'Otro', emoji: '📩' },
+  { id: 'venta', label: 'Venta', emoji: '💸' },
+  { id: 'renta-ingreso', label: 'Renta', emoji: '🏠' },
+  { id: 'otro-ingreso', label: 'Otro ingreso', emoji: '📩' },
 ]
 
 export const EXPENSE_CATEGORIES = [
   { id: 'comida', label: 'Comida', emoji: '🍔' },
+  { id: 'restaurante', label: 'Restaurante', emoji: '🍽️' },
+  { id: 'gasolina', label: 'Gasolina', emoji: '⛽' },
   { id: 'transporte', label: 'Transporte', emoji: '🚗' },
   { id: 'servicios', label: 'Servicios', emoji: '💡' },
+  { id: 'suscripciones', label: 'Suscripciones', emoji: '📱' },
   { id: 'ocio', label: 'Ocio', emoji: '🎬' },
   { id: 'salud', label: 'Salud', emoji: '💊' },
-  { id: 'compras', label: 'Compras', emoji: '🛍' },
-  { id: 'renta', label: 'Renta', emoji: '🏠' },
+  { id: 'compras', label: 'Compras', emoji: '🛍️' },
+  { id: 'renta', label: 'Renta / Hipoteca', emoji: '🏠' },
+  { id: 'educacion', label: 'Educación', emoji: '📚' },
   { id: 'otro-gasto', label: 'Otro', emoji: '📦' },
 ]
 

@@ -19,6 +19,34 @@ export function calculatePlanContribution(
   }
 }
 
+export function fixedExpensesInPeriod(
+  expenses: { amount: number; day_of_month: number }[],
+  todayDate: Date,
+  nextPayday: Date
+): number {
+  const todayDay = todayDate.getDate()
+  const todayMonth = todayDate.getMonth()
+  const todayYear = todayDate.getFullYear()
+  const payMonth = nextPayday.getMonth()
+  const payYear = nextPayday.getFullYear()
+  const payDay = nextPayday.getDate()
+
+  return expenses.reduce((sum, exp) => {
+    const dom = exp.day_of_month
+    // Check if day_of_month falls between today and payday (inclusive)
+    // Handle same-month and cross-month periods
+    if (todayMonth === payMonth && todayYear === payYear) {
+      if (dom >= todayDay && dom <= payDay) return sum + exp.amount
+    } else {
+      // Cross-month: today..end-of-month OR 1..payDay
+      const lastDayOfTodayMonth = new Date(todayYear, todayMonth + 1, 0).getDate()
+      if (dom >= todayDay && dom <= lastDayOfTodayMonth) return sum + exp.amount
+      if (dom >= 1 && dom <= payDay) return sum + exp.amount
+    }
+    return sum
+  }, 0)
+}
+
 export function getNextOccurrence(month: number): Date {
   const today = new Date()
   const year = today.getFullYear()

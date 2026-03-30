@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getCategoryEmoji } from '@/lib/categories'
 import { getLocalDateString } from '@/lib/date'
+import { fixedExpensesInPeriod } from '@/lib/calculations'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePlans } from '@/hooks/usePlans'
 import { useFixedExpenses } from '@/hooks/useFixedExpenses'
@@ -14,7 +15,6 @@ import SwipeableRow from '@/components/ui/SwipeableRow'
 import type { Transaction } from '@/types'
 import Button from '@/components/ui/Button'
 import Chip from '@/components/ui/Chip'
-import ProgressBar from '@/components/ui/ProgressBar'
 
 const MONTHS_SHORT = [
   'ene', 'feb', 'mar', 'abr', 'may', 'jun',
@@ -103,8 +103,8 @@ export default function HomePage() {
     daysSinceLastIncome,
   } = useTransactions()
   const { plans, totalSavingsPerFortnight } = usePlans()
-  const { expenses } = useFixedExpenses()
-  const { daysRemaining, progress, currentFortnight } = usePayday()
+  const { expenses, createExpense } = useFixedExpenses()
+  const { daysRemaining, progress, previousPayday, currentFortnight, nextPayday } = usePayday()
 
   const supabase = createClient()
 
@@ -259,10 +259,33 @@ export default function HomePage() {
     setTimeout(() => todaySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
+  const fixedThisPeriod = fixedExpensesInPeriod(expenses, new Date(), nextPayday)
+
   const dailyBudget =
     daysRemaining > 0
-      ? (currentBalance - totalSavingsPerFortnight) / daysRemaining
+      ? (currentBalance - totalSavingsPerFortnight - fixedThisPeriod) / daysRemaining
       : 0
+
+  // Carryover: balance from before current fortnight's income
+  const lastQuincena = transactions.find(
+    (t) => t.type === 'income' && t.category_id === 'quincena'
+  )
+  const carryover = lastQuincena
+    ? lastQuincena.balance_before
+    : null
+
+  // Burn rate
+  const prevPaydayStr = getLocalDateString(previousPayday)
+  const spentThisPeriod = transactions
+    .filter((t) => t.type === 'expense' && t.date >= prevPaydayStr)
+    .reduce((sum, t) => sum + t.amount, 0)
+  const totalAvailable = currentBalance + spentThisPeriod
+  const burnPct = totalAvailable > 0 ? spentThisPeriod / totalAvailable : 0
+  const timePct = progress
+
+  let burnColor = '#f59e0b' // amber — on pace
+  if (burnPct < timePct - 0.1) burnColor = '#16a34a' // green — ahead
+  else if (burnPct > timePct + 0.1) burnColor = '#dc2626' // red — overspending
 
   const today = new Date()
   const dateStr = today.toLocaleDateString('es-MX', {
@@ -320,15 +343,31 @@ export default function HomePage() {
         </p>
       </div>
 
-      <div className="flex justify-center mb-6">
+      <div className="flex justify-center gap-3 mb-6">
         <Chip label="Días restantes" value={`${daysRemaining}`} />
+        {carryover !== null && carryover > 0 && (
+          <Chip label="Quincena anterior" value={`+${formatMoney(carryover)}`} />
+        )}
       </div>
 
       <div className="mb-6">
-        <ProgressBar progress={progress} colorMode="dynamic" />
-        <p className="text-xs text-[var(--text-muted)] text-center mt-1">
-          Quincena {currentFortnight}
-        </p>
+        <div className="h-1.5 rounded-full bg-[var(--bg-secondary)] overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{
+              width: `${Math.min(burnPct, 1) * 100}%`,
+              backgroundColor: burnColor,
+            }}
+          />
+        </div>
+        <div className="flex justify-between mt-1.5">
+          <span className="text-[11px] text-[var(--text-muted)]">
+            Gastado {formatMoney(spentThisPeriod)}
+          </span>
+          <span className="text-[11px] text-[var(--text-muted)]">
+            Disponible {formatMoney(currentBalance)}
+          </span>
+        </div>
       </div>
 
       <Button fullWidth onClick={() => setModalOpen(true)}>
@@ -470,6 +509,7 @@ export default function HomePage() {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSave={createTransaction}
+        onCreateFixedExpense={createExpense}
         plans={plans}
         currentBalance={currentBalance}
         daysSinceLastIncome={daysSinceLastIncome}

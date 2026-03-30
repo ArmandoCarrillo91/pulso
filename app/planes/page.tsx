@@ -62,7 +62,7 @@ export default function PlanesPage() {
     deletePlan,
   } = usePlans()
   const { currentBalance } = useTransactions()
-  const { daysRemaining } = usePayday()
+  const { daysRemaining, nextPayday } = usePayday()
   const [wizardOpen, setWizardOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
 
@@ -137,6 +137,7 @@ export default function PlanesPage() {
         currentBalance={currentBalance}
         totalSavingsPerFortnight={totalSavingsPerFortnight}
         daysRemaining={daysRemaining}
+        nextPayday={nextPayday}
       />
     </div>
   )
