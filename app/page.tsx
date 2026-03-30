@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getLocalDateString } from '@/lib/date'
 import { fixedExpensesInPeriod } from '@/lib/calculations'
+import { detectPlatform } from '@/lib/utils'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePlans } from '@/hooks/usePlans'
 import { useFixedExpenses } from '@/hooks/useFixedExpenses'
@@ -12,7 +13,7 @@ import TransactionModal from '@/components/modals/TransactionModal'
 import EditTransactionModal from '@/components/modals/EditTransactionModal'
 import SwipeableRow from '@/components/ui/SwipeableRow'
 import Toast from '@/components/ui/Toast'
-import type { Transaction } from '@/types'
+import type { Transaction, FixedExpense } from '@/types'
 import Button from '@/components/ui/Button'
 import { HeroSkeleton, BurnBarSkeleton, TransactionListSkeleton } from '@/components/ui/Skeleton'
 
@@ -31,8 +32,11 @@ interface LogEntry {
   amount: number
   type: 'income' | 'expense'
   badge?: string
+  badgeColor?: 'muted' | 'amber' | 'positive'
   projected: boolean
+  paid?: boolean
   transaction?: Transaction
+  fixedExpense?: FixedExpense
 }
 
 function formatMoney(amount: number): string {
@@ -80,6 +84,12 @@ function shiftMonth(m: number, y: number, delta: number) {
   return { month, year }
 }
 
+/** Check if a YYYY-MM-DD date falls in a given month/year */
+function isInMonth(dateStr: string, month: number, year: number): boolean {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.getMonth() === month && d.getFullYear() === year
+}
+
 export default function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
@@ -87,6 +97,12 @@ export default function HomePage() {
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const nameInputRef = useRef<HTMLInputElement>(null)
+
+  // Confirm payment modal state
+  const [confirmingExpense, setConfirmingExpense] = useState<FixedExpense | null>(null)
+  const [confirmNote, setConfirmNote] = useState('')
+  const [confirmDate, setConfirmDate] = useState('')
+  const [confirmSaving, setConfirmSaving] = useState(false)
 
   const now = new Date()
   const [activeMonth, setActiveMonth] = useState({
@@ -139,6 +155,71 @@ export default function HomePage() {
     if (e.key === 'Escape') setEditingName(false)
   }
 
+  // Confirm payment handler
+  const handleConfirmPayment = async () => {
+    if (!confirmingExpense) return
+    setConfirmSaving(true)
+
+    const selectedDate = confirmDate || getLocalDateString()
+    const dateObj = new Date(selectedDate + 'T12:00:00')
+    const nowTime = new Date()
+
+    const transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'> = {
+      type: 'expense',
+      category_id: confirmingExpense.category_id,
+      amount: confirmingExpense.amount,
+      note: confirmNote.trim() || `Pago: ${confirmingExpense.name}`,
+      rating: null,
+      date: selectedDate,
+      weekday: dateObj.getDay(),
+      hour: nowTime.getHours(),
+      is_weekend: dateObj.getDay() === 0 || dateObj.getDay() === 6,
+      fortnight: currentFortnight,
+      geo_lat: null,
+      geo_lng: null,
+      geo_accuracy: null,
+      platform: detectPlatform(),
+      source: 'manual',
+      entry_seconds: 0,
+      category_changes: 0,
+      had_note: confirmNote.trim().length > 0,
+      balance_before: currentBalance,
+      balance_after: currentBalance - confirmingExpense.amount,
+      days_since_last_income: daysSinceLastIncome,
+      days_until_next_payday: daysRemaining,
+    }
+
+    await createTransaction(transaction)
+
+    // Update the fixed expense record
+    const updates: Record<string, unknown> = { last_paid_date: selectedDate }
+
+    if (confirmingExpense.expense_type === 'msi') {
+      const newPaid = (confirmingExpense.paid_installments || 0) + 1
+      const total = confirmingExpense.total_installments || 0
+      updates.paid_installments = newPaid
+      if (newPaid >= total) {
+        // Fully paid — mark as completed
+        updates.completed_at = new Date().toISOString()
+      } else {
+        // Advance next_payment_date to next month same day
+        const nextDate = new Date(selectedDate + 'T12:00:00')
+        nextDate.setMonth(nextDate.getMonth() + 1)
+        updates.next_payment_date = getLocalDateString(nextDate)
+      }
+    }
+
+    await supabase
+      .from('fixed_expenses')
+      .update(updates)
+      .eq('id', confirmingExpense.id)
+
+    setConfirmSaving(false)
+    setConfirmingExpense(null)
+    setConfirmNote('')
+    setConfirmDate('')
+  }
+
   // Build unified log entries
   const todayStr = getLocalDateString()
 
@@ -164,35 +245,80 @@ export default function HomePage() {
         transaction: t,
       }))
 
-    // B) Projected fixed expenses (today or future only)
-    const fixedEntries: LogEntry[] = expenses
-      .map((exp) => {
-        const day = Math.min(exp.day_of_month, lastDay)
-        const dateStr = `${ay}-${pad2(am + 1)}-${pad2(day)}`
-        return {
+    // B) Projected fixed expenses and MSI — show on their day_of_month
+    const fixedEntries: LogEntry[] = expenses.flatMap((exp) => {
+      const day = Math.min(exp.day_of_month, lastDay)
+      const dateStr = `${ay}-${pad2(am + 1)}-${pad2(day)}`
+
+      if (exp.expense_type === 'msi') {
+        // MSI: only show between start_date and end_date, and not if fully paid
+        const total = exp.total_installments || 1
+        const paid = exp.paid_installments || 0
+        if (paid >= total) return [] // completed
+
+        if (exp.start_date && dateStr < exp.start_date.slice(0, 7) + '-01') return []
+        if (exp.end_date && dateStr > exp.end_date) return []
+
+        const paidThisMonth = exp.last_paid_date
+          ? isInMonth(exp.last_paid_date, am, ay)
+          : false
+
+        return [{
           id: `fixed-${exp.id}`,
           kind: 'fixed' as const,
           date: dateStr,
           label: exp.name,
-          subtitle: `día ${exp.day_of_month}`,
+          emoji: exp.category?.emoji,
+          subtitle: `${paid} de ${total} pagos`,
           amount: exp.amount,
           type: 'expense' as const,
-          badge: 'gasto fijo',
-          projected: true,
-        }
-      })
-      .filter((e) => e.date >= todayStr)
+          badge: paidThisMonth ? 'pagado' : 'MSI',
+          badgeColor: paidThisMonth ? 'positive' : 'amber',
+          projected: !paidThisMonth,
+          paid: paidThisMonth,
+          fixedExpense: exp,
+        }]
+      }
 
-    // C) Projected savings plans at fortnight dates (today or future only)
+      // Regular fixed expense
+      const paidThisMonth = exp.last_paid_date
+        ? isInMonth(exp.last_paid_date, am, ay)
+        : false
+
+      return [{
+        id: `fixed-${exp.id}`,
+        kind: 'fixed' as const,
+        date: dateStr,
+        label: exp.name,
+        emoji: exp.category?.emoji,
+        subtitle: `día ${exp.day_of_month}`,
+        amount: exp.amount,
+        type: 'expense' as const,
+        badge: paidThisMonth ? 'pagado' : 'gasto fijo',
+        projected: !paidThisMonth,
+        paid: paidThisMonth,
+        fixedExpense: exp,
+      }]
+    })
+
+    // C) Projected savings plans — max 2 per month (day 15 and last day)
+    // Respect start_date and target_date bounds
     const planEntries: LogEntry[] = plans.flatMap((plan) => {
-      const dates = [
+      const fortnightDates = [
         `${ay}-${pad2(am + 1)}-15`,
         `${ay}-${pad2(am + 1)}-${pad2(lastDay)}`,
       ]
-      return dates
-        .filter((d) => d >= todayStr)
+
+      return fortnightDates
+        .filter((d) => {
+          // Must be on or after start_date
+          if (d < plan.start_date) return false
+          // Must be on or before target_date (if set)
+          if (plan.target_date && d > plan.target_date) return false
+          return true
+        })
         .map((d, i) => ({
-          id: `plan-${plan.id}-${i}`,
+          id: `plan-${plan.id}-${am}-${i}`,
           kind: 'plan' as const,
           date: d,
           label: plan.name,
@@ -265,9 +391,22 @@ export default function HomePage() {
 
   const fixedThisPeriod = fixedExpensesInPeriod(expenses, new Date(), nextPayday)
 
+  // MSI per-fortnight deduction: active MSIs contribute amount/2 per fortnight
+  const msiPerFortnight = expenses
+    .filter((e) => {
+      if (e.expense_type !== 'msi') return false
+      const total = e.total_installments || 0
+      const paid = e.paid_installments || 0
+      if (paid >= total) return false
+      if (e.start_date && todayStr < e.start_date) return false
+      if (e.end_date && todayStr > e.end_date) return false
+      return true
+    })
+    .reduce((sum, e) => sum + e.amount / 2, 0)
+
   const dailyBudget =
     daysRemaining > 0
-      ? (currentBalance - totalSavingsPerFortnight - fixedThisPeriod) / daysRemaining
+      ? (currentBalance - totalSavingsPerFortnight - fixedThisPeriod - msiPerFortnight) / daysRemaining
       : 0
 
   // Carryover: balance from before current fortnight's income
@@ -443,13 +582,18 @@ export default function HomePage() {
               <div className="space-y-1.5">
                 {section.entries.map((entry) => {
                   const isTransaction = entry.kind === 'transaction'
+                  const isFixedUnpaid = entry.kind === 'fixed' && !entry.paid
 
                   const rowContent = (
                     <div
                       className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]"
-                      style={{ opacity: entry.projected ? 0.5 : 1 }}
+                      style={{ opacity: entry.projected && !entry.paid ? 0.5 : entry.paid ? 0.4 : 1 }}
                     >
-                      {entry.projected ? (
+                      {entry.paid ? (
+                        <span className="w-4 h-4 rounded-full bg-positive/20 flex items-center justify-center shrink-0">
+                          <span className="text-[10px] text-positive">✓</span>
+                        </span>
+                      ) : entry.projected ? (
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ border: '1.5px dashed var(--text-muted)' }} />
                       ) : (
                         <span className={`w-2 h-2 rounded-full shrink-0 ${entry.type === 'income' ? 'bg-positive' : 'bg-negative'}`} />
@@ -460,10 +604,16 @@ export default function HomePage() {
                           {entry.emoji && (
                             <span className="text-sm">{entry.emoji}</span>
                           )}
-                          <p className="text-sm font-medium truncate">{entry.label}</p>
+                          <p className={`text-sm font-medium truncate ${entry.paid ? 'line-through' : ''}`}>{entry.label}</p>
                           {entry.badge && (
-                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--border-color)] text-[var(--text-muted)] shrink-0">
-                              {entry.badge}
+                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
+                              entry.paid
+                                ? 'bg-positive/10 text-positive'
+                                : entry.badgeColor === 'amber'
+                                  ? 'bg-amber-500/10 text-amber-500'
+                                  : 'bg-[var(--border-color)] text-[var(--text-muted)]'
+                            }`}>
+                              {entry.paid ? '✓ Pagado' : entry.badge}
                             </span>
                           )}
                         </div>
@@ -473,6 +623,20 @@ export default function HomePage() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
+                        {isFixedUnpaid && (
+                          <button
+                            className="text-[10px] font-semibold text-positive px-2 py-1 rounded-btn"
+                            style={{ border: '0.5px solid rgba(22, 163, 74, 0.3)' }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setConfirmingExpense(entry.fixedExpense!)
+                              setConfirmDate(getLocalDateString())
+                              setConfirmNote('')
+                            }}
+                          >
+                            ✓ Confirmar
+                          </button>
+                        )}
                         <span className={`font-semibold text-sm ${entry.type === 'income' ? 'text-positive' : entry.projected ? 'text-[var(--text-secondary)]' : 'text-negative'}`}>
                           {entry.type === 'income' ? '+' : '−'}${entry.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                         </span>
@@ -501,6 +665,56 @@ export default function HomePage() {
           )
         })}
       </div>
+
+      {/* Confirm Payment Modal */}
+      {confirmingExpense && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setConfirmingExpense(null)} />
+          <div className="relative w-full max-w-app bg-[var(--bg-card)] rounded-t-[24px] p-6 pb-8 animate-slide-up">
+            <h2 className="text-lg font-bold mb-1">¿Confirmar pago?</h2>
+            <p className="text-sm text-[var(--text-secondary)] mb-4">
+              {confirmingExpense.name}
+            </p>
+
+            <div className="flex items-center justify-center mb-4">
+              <span className="text-3xl font-bold">
+                {formatMoney(confirmingExpense.amount)}
+              </span>
+            </div>
+
+            <label className="block text-xs text-[var(--text-secondary)] mb-1">
+              Fecha
+            </label>
+            <input
+              type="date"
+              value={confirmDate}
+              onChange={(e) => setConfirmDate(e.target.value)}
+              max={getLocalDateString()}
+              className="input-field mb-3"
+            />
+
+            <label className="block text-xs text-[var(--text-secondary)] mb-1">
+              Nota (opcional)
+            </label>
+            <input
+              type="text"
+              value={confirmNote}
+              onChange={(e) => setConfirmNote(e.target.value)}
+              placeholder={`Pago: ${confirmingExpense.name}`}
+              className="input-field mb-4"
+            />
+
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={() => setConfirmingExpense(null)}>
+                Cancelar
+              </Button>
+              <Button fullWidth disabled={confirmSaving} onClick={handleConfirmPayment}>
+                {confirmSaving ? 'Guardando...' : 'Confirmar pago'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Transaction Modal */}
       <EditTransactionModal

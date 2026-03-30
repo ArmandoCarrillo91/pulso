@@ -2,23 +2,9 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { getLocalDateString } from '@/lib/date'
-import {
-  calculatePlanContribution,
-  getNextOccurrence,
-} from '@/lib/calculations'
+import { calculatePlanContribution } from '@/lib/calculations'
 import Button from '@/components/ui/Button'
-import type { Plan, PlanType } from '@/types'
-
-const MONTHS_FULL = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-]
-
-const PLAN_TYPES: { id: PlanType; label: string; emoji: string; color: string }[] = [
-  { id: 'meta', label: 'Meta', emoji: '🎯', color: 'text-positive border-positive bg-positive/10' },
-  { id: 'anual', label: 'Anual', emoji: '📅', color: 'text-amber-500 border-amber-500 bg-amber-500/10' },
-  { id: 'estacional', label: 'Estacional', emoji: '🌊', color: 'text-purple-500 border-purple-500 bg-purple-500/10' },
-]
+import type { Plan } from '@/types'
 
 interface PlanWizardModalProps {
   isOpen: boolean
@@ -28,6 +14,7 @@ interface PlanWizardModalProps {
   totalSavingsPerFortnight: number
   daysRemaining: number
   nextPayday: Date
+  plansCount: number
 }
 
 export default function PlanWizardModal({
@@ -38,84 +25,62 @@ export default function PlanWizardModal({
   totalSavingsPerFortnight,
   daysRemaining,
   nextPayday,
+  plansCount,
 }: PlanWizardModalProps) {
   const [step, setStep] = useState(1)
-  const [planType, setPlanType] = useState<PlanType>('meta')
   const [name, setName] = useState('')
   const [goalAmount, setGoalAmount] = useState('')
   const [targetDate, setTargetDate] = useState('')
-  const [recurrenceMonth, setRecurrenceMonth] = useState(12)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       setStep(1)
-      setPlanType('meta')
       setName('')
       setGoalAmount('')
       setTargetDate('')
-      setRecurrenceMonth(12)
       setSaving(false)
     }
   }, [isOpen])
-
-  const handleTypeSelect = (type: PlanType) => {
-    setPlanType(type)
-    setStep(2)
-  }
 
   // Compute contribution in real time
   const contribution = useMemo(() => {
     const goal = parseFloat(goalAmount)
     if (!goal || goal <= 0) return null
+    if (!targetDate) return null
 
     const start = new Date()
-    let end: Date
-
-    if (planType === 'anual') {
-      end = getNextOccurrence(recurrenceMonth)
-    } else {
-      if (!targetDate) return null
-      end = new Date(targetDate + 'T12:00:00')
-      if (end <= start) return null
-    }
+    const end = new Date(targetDate + 'T12:00:00')
+    if (end <= start) return null
 
     return calculatePlanContribution(goal, start, end)
-  }, [goalAmount, targetDate, recurrenceMonth, planType])
-
-  const resolvedTargetDate = useMemo(() => {
-    if (planType === 'anual') {
-      return getLocalDateString(getNextOccurrence(recurrenceMonth))
-    }
-    return targetDate
-  }, [planType, recurrenceMonth, targetDate])
+  }, [goalAmount, targetDate])
 
   // Impact preview
   const currentDaily =
     daysRemaining > 0
       ? (currentBalance - totalSavingsPerFortnight) / daysRemaining
       : 0
+
+  const perFortnight = contribution?.amountPerFortnight ?? 0
+
   const newDaily =
-    daysRemaining > 0 && contribution
-      ? (currentBalance - totalSavingsPerFortnight - contribution.amountPerFortnight) / daysRemaining
+    daysRemaining > 0 && perFortnight > 0
+      ? (currentBalance - totalSavingsPerFortnight - perFortnight) / daysRemaining
       : currentDaily
 
   const handleConfirm = async () => {
-    if (!contribution || !name.trim()) return
+    if (!name.trim() || !parseFloat(goalAmount)) return
     setSaving(true)
 
     await onSave({
       name: name.trim(),
-      amount_per_fortnight: contribution.amountPerFortnight,
+      amount_per_fortnight: perFortnight,
       goal_amount: parseFloat(goalAmount),
-      time_value: contribution.fortnightsRemaining,
-      time_unit: 'fortnights',
-      priority: 999,
-      plan_type: planType,
+      priority: plansCount,
       start_date: getLocalDateString(nextPayday),
-      target_date: resolvedTargetDate || null,
+      target_date: targetDate || null,
       current_amount: 0,
-      recurrence_month: planType === 'anual' ? recurrenceMonth : null,
     })
 
     setSaving(false)
@@ -124,7 +89,6 @@ export default function PlanWizardModal({
 
   if (!isOpen) return null
 
-  const typeInfo = PLAN_TYPES.find((t) => t.id === planType)!
   const todayMin = getLocalDateString()
 
   const fmt = (n: number) =>
@@ -149,113 +113,91 @@ export default function PlanWizardModal({
           ))}
         </div>
 
-        {/* Step 1: Type */}
+        {/* Step 1: Name */}
         {step === 1 && (
           <div>
-            <h2 className="text-lg font-bold mb-4">Tipo de plan</h2>
-            <div className="space-y-3">
-              {PLAN_TYPES.map((t) => (
-                <button
-                  key={t.id}
-                  className={`w-full flex items-center gap-4 p-4 rounded-card border-2 transition-all ${t.color}`}
-                  onClick={() => handleTypeSelect(t.id)}
-                >
-                  <span className="text-3xl">{t.emoji}</span>
-                  <div className="text-left">
-                    <p className="font-semibold">{t.label}</p>
-                    <p className="text-xs opacity-70">
-                      {t.id === 'meta' && 'Ahorra para una meta específica'}
-                      {t.id === 'anual' && 'Gasto que se repite cada año'}
-                      {t.id === 'estacional' && 'Ahorro por temporada'}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Details */}
-        {step === 2 && (
-          <div>
-            <h2 className="text-lg font-bold mb-4">Detalles del plan</h2>
-
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">
-              Nombre
-            </label>
+            <h2 className="text-lg font-bold mb-6 text-center">
+              Nuevo plan de ahorro
+            </h2>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={
-                planType === 'meta'
-                  ? 'Ej: Fondo de emergencia'
-                  : planType === 'anual'
-                    ? 'Ej: Seguro del auto'
-                    : 'Ej: Vacaciones de verano'
-              }
-              className="input-field mb-3"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && name.trim()) setStep(2)
+              }}
+              placeholder="¿Para qué estás ahorrando?"
+              className="w-full text-center text-xl font-semibold bg-transparent outline-none border-b-2 border-[var(--border-color)] focus:border-positive pb-3 mb-8 transition-colors"
               autoFocus
             />
+            <Button
+              fullWidth
+              disabled={!name.trim()}
+              onClick={() => setStep(2)}
+            >
+              Siguiente
+            </Button>
+          </div>
+        )}
 
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">
-              Monto meta
-            </label>
-            <div className="flex items-center mb-3">
-              <span className="text-lg font-bold mr-1">$</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                value={goalAmount}
-                onChange={(e) => setGoalAmount(e.target.value)}
-                placeholder="0.00"
-                className="input-field flex-1"
-              />
-            </div>
+        {/* Step 2: Amount + Date */}
+        {step === 2 && (
+          <div>
+            <h2 className="text-lg font-bold mb-4">{name}</h2>
 
-            {planType === 'anual' ? (
-              <>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
                 <label className="block text-xs text-[var(--text-secondary)] mb-1">
-                  Mes de pago
+                  ¿Cuánto necesitas?
                 </label>
-                <select
-                  value={recurrenceMonth}
-                  onChange={(e) => setRecurrenceMonth(parseInt(e.target.value))}
-                  className="input-field mb-3"
-                >
-                  {MONTHS_FULL.map((m, i) => (
-                    <option key={i} value={i + 1}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </>
-            ) : (
-              <>
+                <div className="flex items-center">
+                  <span className="text-lg font-bold mr-1">$</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={goalAmount}
+                    onChange={(e) => setGoalAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="input-field flex-1"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div>
                 <label className="block text-xs text-[var(--text-secondary)] mb-1">
-                  Fecha límite
+                  ¿Para cuándo?
                 </label>
                 <input
                   type="date"
                   value={targetDate}
                   onChange={(e) => setTargetDate(e.target.value)}
                   min={todayMin}
-                  className="input-field mb-3"
+                  placeholder="Sin fecha límite"
+                  className="input-field"
                 />
-              </>
-            )}
+              </div>
+            </div>
 
             {/* Live calculation */}
-            {contribution && (
-              <div className="bg-positive/10 rounded-btn p-3 mb-4">
-                <p className="text-sm text-positive font-semibold">
-                  ${fmt(contribution.amountPerFortnight)}/quincena
+            <div className="bg-[var(--bg-secondary)] rounded-btn p-3 mb-4 min-h-[52px] flex items-center justify-center">
+              {contribution ? (
+                <p className="text-sm text-positive font-semibold text-center">
+                  Apartarás ${fmt(contribution.amountPerFortnight)} cada quincena
                 </p>
-                <p className="text-xs text-positive/70">
-                  {contribution.fortnightsRemaining} quincenas · incluye 10% de margen
+              ) : targetDate && parseFloat(goalAmount) > 0 ? (
+                <p className="text-sm text-negative text-center">
+                  La fecha debe ser futura
                 </p>
-              </div>
-            )}
+              ) : !targetDate && parseFloat(goalAmount) > 0 ? (
+                <p className="text-sm text-[var(--text-muted)] text-center">
+                  Tú decides cuándo termina
+                </p>
+              ) : (
+                <p className="text-sm text-[var(--text-muted)] text-center">
+                  Ingresa monto y fecha para calcular
+                </p>
+              )}
+            </div>
 
             <div className="flex gap-3">
               <Button variant="secondary" onClick={() => setStep(1)}>
@@ -263,7 +205,7 @@ export default function PlanWizardModal({
               </Button>
               <Button
                 fullWidth
-                disabled={!name.trim() || !contribution}
+                disabled={!parseFloat(goalAmount)}
                 onClick={() => setStep(3)}
               >
                 Siguiente
@@ -272,48 +214,43 @@ export default function PlanWizardModal({
           </div>
         )}
 
-        {/* Step 3: Confirmation */}
-        {step === 3 && contribution && (
+        {/* Step 3: Impact confirmation */}
+        {step === 3 && (
           <div>
             <h2 className="text-lg font-bold mb-4">Confirmar plan</h2>
 
             <div className="card mb-4">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">{typeInfo.emoji}</span>
-                <p className="font-bold">{name}</p>
-                <span
-                  className={`text-[9px] font-semibold px-2 py-0.5 rounded-full ${typeInfo.color}`}
-                >
-                  {typeInfo.label}
-                </span>
-              </div>
+              <p className="font-bold mb-3">{name}</p>
 
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-[var(--text-secondary)]">Meta</span>
-                  <span className="font-semibold">${fmt(parseFloat(goalAmount))}</span>
+                  <span className="font-semibold">${fmt(parseFloat(goalAmount) || 0)}</span>
                 </div>
+                {contribution && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-secondary)]">Por quincena</span>
+                      <span className="font-semibold text-positive">
+                        ${fmt(contribution.amountPerFortnight)}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-[var(--text-muted)]">
+                      incluye 10% margen de seguridad
+                    </p>
+                  </>
+                )}
                 <div className="flex justify-between">
-                  <span className="text-[var(--text-secondary)]">Por quincena</span>
-                  <span className="font-semibold text-positive">
-                    ${fmt(contribution.amountPerFortnight)}
+                  <span className="text-[var(--text-secondary)]">Fecha límite</span>
+                  <span>
+                    {targetDate
+                      ? new Date(targetDate + 'T12:00:00').toLocaleDateString(
+                          'es-MX',
+                          { day: 'numeric', month: 'short', year: 'numeric' }
+                        )
+                      : 'Sin fecha límite'}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-[var(--text-secondary)]">Duración</span>
-                  <span>{contribution.fortnightsRemaining} quincenas</span>
-                </div>
-                {resolvedTargetDate && (
-                  <div className="flex justify-between">
-                    <span className="text-[var(--text-secondary)]">Vence</span>
-                    <span>
-                      {new Date(resolvedTargetDate + 'T12:00:00').toLocaleDateString(
-                        'es-MX',
-                        { day: 'numeric', month: 'short', year: 'numeric' }
-                      )}
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -348,7 +285,7 @@ export default function PlanWizardModal({
             </div>
 
             <p className="text-xs text-[var(--text-muted)] text-center mb-4">
-              Este plan empieza a descontar en tu próxima quincena:{' '}
+              Empieza a descontar en tu próxima quincena:{' '}
               <span className="font-semibold text-[var(--text-secondary)]">
                 {nextPayday.toLocaleDateString('es-MX', {
                   day: 'numeric',

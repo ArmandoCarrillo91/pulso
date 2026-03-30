@@ -22,6 +22,13 @@ interface TransactionModalProps {
     category_id: string | null
     next_payment_date: string | null
     end_date: string | null
+    last_paid_date: string | null
+    start_date: string | null
+    total_installments: number | null
+    paid_installments: number
+    expense_type: 'fixed' | 'msi'
+    completed_at: string | null
+    total_amount: number | null
   }) => Promise<unknown>
   plans: Plan[]
   currentBalance: number
@@ -204,6 +211,13 @@ export default function TransactionModal({
         category_id: categoryId,
         next_payment_date: null,
         end_date: null,
+        last_paid_date: null,
+        start_date: null,
+        total_installments: null,
+        paid_installments: 0,
+        expense_type: 'fixed',
+        completed_at: null,
+        total_amount: null,
       })
     }
 

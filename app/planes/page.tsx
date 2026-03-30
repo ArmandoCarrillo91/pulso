@@ -11,13 +11,7 @@ import Toast from '@/components/ui/Toast'
 import ProgressBar from '@/components/ui/ProgressBar'
 import Button from '@/components/ui/Button'
 import { PlanListSkeleton } from '@/components/ui/Skeleton'
-import type { Plan, PlanType } from '@/types'
-
-const TYPE_BADGE: Record<PlanType, { label: string; emoji: string; cls: string }> = {
-  meta: { label: 'Meta', emoji: '🎯', cls: 'text-positive bg-positive/10' },
-  anual: { label: 'Anual', emoji: '📅', cls: 'text-amber-500 bg-amber-500/10' },
-  estacional: { label: 'Estacional', emoji: '🌊', cls: 'text-purple-500 bg-purple-500/10' },
-}
+import type { Plan } from '@/types'
 
 const MONTHS_SHORT = [
   'ene', 'feb', 'mar', 'abr', 'may', 'jun',
@@ -31,27 +25,21 @@ function fmt(n: number) {
   })
 }
 
+function fmtDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`
+}
+
+function daysUntil(dateStr: string): number {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(dateStr + 'T12:00:00')
+  return Math.max(Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)), 0)
+}
+
 function planProgress(plan: Plan) {
   if (!plan.goal_amount) return 0
   return Math.min((plan.current_amount || 0) / plan.goal_amount, 1)
-}
-
-function planEta(plan: Plan): string {
-  const parts: string[] = []
-  parts.push(`$${fmt(plan.current_amount || 0)} de $${fmt(plan.goal_amount)}`)
-
-  const remaining = plan.goal_amount - (plan.current_amount || 0)
-  if (plan.amount_per_fortnight > 0 && remaining > 0) {
-    const fn = Math.ceil(remaining / plan.amount_per_fortnight)
-    parts.push(`faltan ${fn} quincenas`)
-  }
-
-  if (plan.target_date) {
-    const d = new Date(plan.target_date + 'T12:00:00')
-    parts.push(`vence ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`)
-  }
-
-  return parts.join(' · ')
 }
 
 export default function PlanesPage() {
@@ -72,8 +60,15 @@ export default function PlanesPage() {
 
   return (
     <div className="min-h-screen p-4" style={{ paddingBottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
-      <div className="mb-6">
+      {/* Header with + button */}
+      <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-bold">Mis planes</h1>
+        <button
+          className="text-sm text-positive font-semibold"
+          onClick={() => setWizardOpen(true)}
+        >
+          + Nueva
+        </button>
       </div>
 
       {loading && <PlanListSkeleton />}
@@ -89,8 +84,8 @@ export default function PlanesPage() {
 
       <div className="space-y-3">
         {plans.map((plan) => {
-          const badge = TYPE_BADGE[plan.plan_type] || TYPE_BADGE.meta
           const progress = planProgress(plan)
+          const remaining = daysUntil(plan.target_date || '')
 
           return (
             <SwipeableRow
@@ -98,19 +93,31 @@ export default function PlanesPage() {
               onEdit={() => setEditingPlan(plan)}
               onDelete={() => deletePlan(plan.id)}
             >
-              <div className="card">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg">{badge.emoji}</span>
-                  <p className="font-semibold text-sm flex-1">{plan.name}</p>
-                  <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}>
-                    {badge.label}
-                  </span>
-                </div>
+              <div
+                className="rounded-card p-4 bg-[var(--bg-card)]"
+                style={{ border: '0.5px solid var(--pill-border)' }}
+              >
+                <p className="font-semibold text-sm mb-1">{plan.name}</p>
                 <p className="text-xs text-[var(--text-secondary)] mb-2">
-                  ${fmt(plan.amount_per_fortnight)}/quincena · {plan.time_value} quincenas
+                  ${fmt(plan.amount_per_fortnight)}/quincena
                 </p>
-                <ProgressBar progress={progress} className="mb-1.5" />
-                <p className="text-[11px] text-[var(--text-muted)]">{planEta(plan)}</p>
+                <ProgressBar progress={progress} className="mb-2" />
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  ${fmt(plan.current_amount || 0)} de ${fmt(plan.goal_amount)}
+                </p>
+                <div className="mt-1.5 space-y-0.5">
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    Inicia: {fmtDate(plan.start_date)}
+                  </p>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    Vence: {plan.target_date ? fmtDate(plan.target_date) : 'Sin fecha límite'}
+                  </p>
+                  {plan.target_date && (
+                    <p className="text-[11px] text-[var(--text-secondary)] font-medium">
+                      {remaining} días restantes
+                    </p>
+                  )}
+                </div>
               </div>
             </SwipeableRow>
           )
@@ -131,6 +138,7 @@ export default function PlanesPage() {
         totalSavingsPerFortnight={totalSavingsPerFortnight}
         daysRemaining={daysRemaining}
         nextPayday={nextPayday}
+        plansCount={plans.length}
       />
 
       <Toast message={toastMsg} visible={!!toastMsg} onHide={clearToast} />

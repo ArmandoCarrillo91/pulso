@@ -3,13 +3,7 @@
 import { useState, useEffect } from 'react'
 import { getLocalDateString } from '@/lib/date'
 import Button from '@/components/ui/Button'
-import type { Plan, PlanType } from '@/types'
-
-const TYPE_OPTIONS: { id: PlanType; label: string; emoji: string }[] = [
-  { id: 'meta', label: 'Meta', emoji: '🎯' },
-  { id: 'anual', label: 'Anual', emoji: '📅' },
-  { id: 'estacional', label: 'Estacional', emoji: '🌊' },
-]
+import type { Plan } from '@/types'
 
 interface EditPlanModalProps {
   plan: Plan | null
@@ -26,7 +20,6 @@ export default function EditPlanModal({
   const [goalAmount, setGoalAmount] = useState('')
   const [amountPerFortnight, setAmountPerFortnight] = useState('')
   const [targetDate, setTargetDate] = useState('')
-  const [planType, setPlanType] = useState<PlanType>('meta')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -35,7 +28,6 @@ export default function EditPlanModal({
       setGoalAmount(String(plan.goal_amount))
       setAmountPerFortnight(String(plan.amount_per_fortnight))
       setTargetDate(plan.target_date || '')
-      setPlanType(plan.plan_type || 'meta')
     }
   }, [plan])
 
@@ -52,7 +44,6 @@ export default function EditPlanModal({
       goal_amount: goal,
       amount_per_fortnight: perFn,
       target_date: targetDate || null,
-      plan_type: planType,
     })
     setSaving(false)
     onClose()
@@ -63,23 +54,6 @@ export default function EditPlanModal({
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative w-full max-w-app bg-[var(--bg-card)] rounded-t-[24px] p-6 pb-8 animate-slide-up max-h-[85vh] overflow-y-auto">
         <h2 className="text-lg font-bold mb-4">Editar plan</h2>
-
-        {/* Type */}
-        <div className="flex gap-2 mb-4">
-          {TYPE_OPTIONS.map((t) => (
-            <button
-              key={t.id}
-              className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-btn text-xs font-semibold transition-all ${
-                planType === t.id
-                  ? 'bg-positive/10 text-positive border border-positive'
-                  : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-transparent'
-              }`}
-              onClick={() => setPlanType(t.id)}
-            >
-              {t.emoji} {t.label}
-            </button>
-          ))}
-        </div>
 
         <label className="block text-xs text-[var(--text-secondary)] mb-1">Nombre</label>
         <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="input-field mb-3" />

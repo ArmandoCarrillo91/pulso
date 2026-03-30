@@ -40,22 +40,17 @@ export interface Transaction {
   source: 'manual' | 'automated' | 'api' | 'import'
 }
 
-export type PlanType = 'meta' | 'anual' | 'estacional'
-
 export interface Plan {
   id: string
   user_id: string
   name: string
   amount_per_fortnight: number
   goal_amount: number
-  time_value: number
-  time_unit: 'fortnights' | 'months' | 'days'
   priority: number
-  plan_type: PlanType
   start_date: string
   target_date: string | null
   current_amount: number
-  recurrence_month: number | null
+  created_at?: string
 }
 
 export interface FixedExpense {
@@ -68,6 +63,13 @@ export interface FixedExpense {
   category?: Category
   next_payment_date: string | null
   end_date: string | null
+  last_paid_date: string | null
+  start_date: string | null
+  total_installments: number | null
+  paid_installments: number
+  expense_type: 'fixed' | 'msi'
+  completed_at: string | null
+  total_amount: number | null
 }
 
 export interface User {
