@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { getCategoryEmoji } from '@/lib/categories'
@@ -21,9 +22,32 @@ function formatMoney(amount: number): string {
   return amount < 0 ? `−$${formatted}` : `$${formatted}`
 }
 
+function formatTransactionDate(dateStr: string): string {
+  const date = new Date(dateStr + 'T12:00:00')
+  const today = new Date()
+  if (
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear()
+  ) {
+    return today.toLocaleTimeString('es-MX', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+  }
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}`
+}
+
 export default function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [userName, setUserName] = useState('')
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
 
   const {
     transactions,
@@ -40,12 +64,42 @@ export default function HomePage() {
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
-        setUserName(
-          user.user_metadata?.first_name || user.email?.split('@')[0] || ''
-        )
+        setUserName(user.user_metadata?.full_name || '')
       }
     })
   }, [supabase])
+
+  useEffect(() => {
+    if (editingName && nameInputRef.current) {
+      nameInputRef.current.focus()
+    }
+  }, [editingName])
+
+  const startEditing = () => {
+    setNameInput(userName)
+    setEditingName(true)
+  }
+
+  const saveName = async () => {
+    const trimmed = nameInput.trim()
+    setEditingName(false)
+    if (trimmed === userName) return
+
+    setUserName(trimmed)
+    await supabase.auth.updateUser({
+      data: { full_name: trimmed },
+    })
+  }
+
+  const handleNameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') saveName()
+    if (e.key === 'Escape') setEditingName(false)
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
 
   const dailyBudget =
     daysRemaining > 0
@@ -68,30 +122,33 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen p-4">
+    <div className="flex flex-col min-h-screen p-4 pb-20">
       {/* Top Bar */}
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-lg font-bold capitalize">{userName}</h1>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-[var(--text-secondary)] capitalize">
-            {dateStr}
-          </span>
-          <Link href="/settings" className="p-2 -mr-2">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </Link>
-        </div>
+        {editingName ? (
+          <input
+            ref={nameInputRef}
+            type="text"
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={handleNameKeyDown}
+            placeholder="Tu nombre"
+            className="text-lg font-bold bg-transparent outline-none border-b-2 border-positive w-40"
+          />
+        ) : (
+          <button
+            onClick={startEditing}
+            className="text-lg font-bold text-left"
+          >
+            {userName || (
+              <span className="text-[var(--text-muted)]">Tu nombre</span>
+            )}
+          </button>
+        )}
+        <span className="text-sm text-[var(--text-secondary)] capitalize">
+          {dateStr}
+        </span>
       </div>
 
       {/* Hero: Daily Budget */}
@@ -108,11 +165,9 @@ export default function HomePage() {
         </p>
       </div>
 
-      {/* Chips */}
-      <div className="flex justify-center gap-3 mb-6">
+      {/* Chip */}
+      <div className="flex justify-center mb-6">
         <Chip label="Días restantes" value={`${daysRemaining}`} />
-        <Chip label="Balance" value={formatMoney(currentBalance)} />
-        <Chip label="Ahorro" value={formatMoney(totalSavingsPerFortnight)} />
       </div>
 
       {/* Progress Bar */}
@@ -131,7 +186,7 @@ export default function HomePage() {
       {/* Transaction History */}
       <div className="mt-6 flex-1">
         <h2 className="text-sm font-semibold text-[var(--text-secondary)] mb-3">
-          Historial
+          Movimientos
         </h2>
         <div className="h-[200px] overflow-y-auto space-y-2">
           {transactions.length === 0 && (
@@ -148,29 +203,72 @@ export default function HomePage() {
                 style={{ opacity }}
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-xl">{getCategoryEmoji(t.category_id)}</span>
-                  <div>
-                    <p className="text-sm font-medium">{t.category_label}</p>
-                    {t.note && (
-                      <p className="text-xs text-[var(--text-muted)] truncate max-w-[160px]">
-                        {t.note}
-                      </p>
-                    )}
-                  </div>
+                  <span className="text-xl">
+                    {getCategoryEmoji(t.category_id)}
+                  </span>
+                  <p className="text-sm font-medium">{t.category_label}</p>
                 </div>
-                <span
-                  className={`font-semibold text-sm ${
-                    t.type === 'income' ? 'text-positive' : 'text-negative'
-                  }`}
-                >
-                  {t.type === 'income' ? '+' : '−'}$
-                  {t.amount.toLocaleString('es-MX', {
-                    minimumFractionDigits: 2,
-                  })}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`font-semibold text-sm ${
+                      t.type === 'income' ? 'text-positive' : 'text-negative'
+                    }`}
+                  >
+                    {t.type === 'income' ? '+' : '−'}$
+                    {t.amount.toLocaleString('es-MX', {
+                      minimumFractionDigits: 2,
+                    })}
+                  </span>
+                  <span className="text-xs text-[var(--text-muted)] w-12 text-right">
+                    {formatTransactionDate(t.date)}
+                  </span>
+                </div>
               </div>
             )
           })}
+        </div>
+      </div>
+
+      {/* Bottom Bar */}
+      <div className="fixed bottom-0 left-0 right-0 z-40">
+        <div className="mx-auto max-w-app flex items-center justify-between px-6 py-4 bg-[var(--bg-card)] border-t border-[var(--border-color)]">
+          <Link
+            href="/settings"
+            className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="p-2 text-[var(--text-secondary)] hover:text-negative transition-colors"
+          >
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
         </div>
       </div>
 
