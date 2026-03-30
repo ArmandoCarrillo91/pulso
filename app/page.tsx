@@ -1,19 +1,38 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getCategoryEmoji } from '@/lib/categories'
+import { getLocalDateString } from '@/lib/date'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePlans } from '@/hooks/usePlans'
+import { useFixedExpenses } from '@/hooks/useFixedExpenses'
 import { usePayday } from '@/hooks/usePayday'
 import TransactionModal from '@/components/modals/TransactionModal'
 import EditTransactionModal from '@/components/modals/EditTransactionModal'
+import SwipeableRow from '@/components/ui/SwipeableRow'
 import type { Transaction } from '@/types'
 import Button from '@/components/ui/Button'
 import Chip from '@/components/ui/Chip'
 import ProgressBar from '@/components/ui/ProgressBar'
+
+const MONTHS_SHORT = [
+  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+  'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+]
+
+interface LogEntry {
+  id: string
+  kind: 'transaction' | 'fixed' | 'plan'
+  date: string
+  label: string
+  subtitle?: string
+  amount: number
+  type: 'income' | 'expense'
+  badge?: string
+  projected: boolean
+  transaction?: Transaction
+}
 
 function formatMoney(amount: number): string {
   const abs = Math.abs(amount)
@@ -24,7 +43,7 @@ function formatMoney(amount: number): string {
   return amount < 0 ? `−$${formatted}` : `$${formatted}`
 }
 
-function formatTransactionDate(dateStr: string): string {
+function formatEntryDate(dateStr: string): string {
   const date = new Date(dateStr + 'T12:00:00')
   const today = new Date()
   if (
@@ -43,6 +62,23 @@ function formatTransactionDate(dateStr: string): string {
   return `${dd}/${mm}`
 }
 
+function formatSectionDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function shiftMonth(m: number, y: number, delta: number) {
+  let month = m + delta
+  let year = y
+  while (month < 0) { month += 12; year-- }
+  while (month > 11) { month -= 12; year++ }
+  return { month, year }
+}
+
 export default function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
@@ -50,7 +86,12 @@ export default function HomePage() {
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const nameInputRef = useRef<HTMLInputElement>(null)
-  const router = useRouter()
+
+  const now = new Date()
+  const [activeMonth, setActiveMonth] = useState({
+    month: now.getMonth(),
+    year: now.getFullYear(),
+  })
 
   const {
     transactions,
@@ -62,22 +103,19 @@ export default function HomePage() {
     daysSinceLastIncome,
   } = useTransactions()
   const { plans, totalSavingsPerFortnight } = usePlans()
+  const { expenses } = useFixedExpenses()
   const { daysRemaining, progress, currentFortnight } = usePayday()
 
   const supabase = createClient()
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setUserName(user.user_metadata?.full_name || '')
-      }
+      if (user) setUserName(user.user_metadata?.full_name || '')
     })
   }, [supabase])
 
   useEffect(() => {
-    if (editingName && nameInputRef.current) {
-      nameInputRef.current.focus()
-    }
+    if (editingName && nameInputRef.current) nameInputRef.current.focus()
   }, [editingName])
 
   const startEditing = () => {
@@ -89,11 +127,8 @@ export default function HomePage() {
     const trimmed = nameInput.trim()
     setEditingName(false)
     if (trimmed === userName) return
-
     setUserName(trimmed)
-    await supabase.auth.updateUser({
-      data: { full_name: trimmed },
-    })
+    await supabase.auth.updateUser({ data: { full_name: trimmed } })
   }
 
   const handleNameKeyDown = (e: React.KeyboardEvent) => {
@@ -101,9 +136,127 @@ export default function HomePage() {
     if (e.key === 'Escape') setEditingName(false)
   }
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/login')
+  // Build unified log entries
+  const todayStr = getLocalDateString()
+
+  const logEntries = useMemo(() => {
+    const { month: am, year: ay } = activeMonth
+    const lastDay = new Date(ay, am + 1, 0).getDate()
+
+    // A) Real transactions for active month
+    const txEntries: LogEntry[] = transactions
+      .filter((t) => {
+        const d = new Date(t.date + 'T12:00:00')
+        return d.getMonth() === am && d.getFullYear() === ay
+      })
+      .map((t) => ({
+        id: t.id,
+        kind: 'transaction' as const,
+        date: t.date,
+        label: t.category_label,
+        amount: t.amount,
+        type: t.type,
+        projected: false,
+        transaction: t,
+      }))
+
+    // B) Projected fixed expenses (today or future only)
+    const fixedEntries: LogEntry[] = expenses
+      .map((exp) => {
+        const day = Math.min(exp.day_of_month, lastDay)
+        const dateStr = `${ay}-${pad2(am + 1)}-${pad2(day)}`
+        return {
+          id: `fixed-${exp.id}`,
+          kind: 'fixed' as const,
+          date: dateStr,
+          label: exp.name,
+          subtitle: `día ${exp.day_of_month}`,
+          amount: exp.amount,
+          type: 'expense' as const,
+          badge: 'gasto fijo',
+          projected: true,
+        }
+      })
+      .filter((e) => e.date >= todayStr)
+
+    // C) Projected savings plans at fortnight dates (today or future only)
+    const planEntries: LogEntry[] = plans.flatMap((plan) => {
+      const dates = [
+        `${ay}-${pad2(am + 1)}-15`,
+        `${ay}-${pad2(am + 1)}-${pad2(lastDay)}`,
+      ]
+      return dates
+        .filter((d) => d >= todayStr)
+        .map((d, i) => ({
+          id: `plan-${plan.id}-${i}`,
+          kind: 'plan' as const,
+          date: d,
+          label: plan.name,
+          subtitle: 'Plan de ahorro',
+          amount: plan.amount_per_fortnight,
+          type: 'expense' as const,
+          badge: 'ahorro',
+          projected: true,
+        }))
+    })
+
+    return [...txEntries, ...fixedEntries, ...planEntries]
+  }, [transactions, expenses, plans, activeMonth, todayStr])
+
+  // Group entries into sections
+  const sections = useMemo(() => {
+    const yesterdayDate = new Date()
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1)
+    const yesterdayStr = getLocalDateString(yesterdayDate)
+
+    const future = logEntries
+      .filter((e) => e.date > todayStr)
+      .sort((a, b) => a.date.localeCompare(b.date))
+    const todayEntries = logEntries.filter((e) => e.date === todayStr)
+    const yesterdayEntries = logEntries.filter((e) => e.date === yesterdayStr)
+    const past = logEntries
+      .filter((e) => e.date < yesterdayStr)
+      .sort((a, b) => b.date.localeCompare(a.date))
+
+    const groups: { label: string; entries: LogEntry[] }[] = []
+
+    if (future.length > 0) groups.push({ label: 'Próximos', entries: future })
+    if (todayEntries.length > 0)
+      groups.push({
+        label: `Hoy · ${formatSectionDate(todayStr)}`,
+        entries: todayEntries,
+      })
+    if (yesterdayEntries.length > 0)
+      groups.push({
+        label: `Ayer · ${formatSectionDate(yesterdayStr)}`,
+        entries: yesterdayEntries,
+      })
+
+    // Past grouped by date
+    const byDate = new Map<string, LogEntry[]>()
+    for (const e of past) {
+      const arr = byDate.get(e.date) || []
+      arr.push(e)
+      byDate.set(e.date, arr)
+    }
+    for (const [date, entries] of byDate) {
+      groups.push({ label: formatSectionDate(date), entries })
+    }
+
+    return groups
+  }, [logEntries, todayStr])
+
+  // Month navigation
+  const prev = shiftMonth(activeMonth.month, activeMonth.year, -1)
+  const next = shiftMonth(activeMonth.month, activeMonth.year, 1)
+  const isCurrentMonth =
+    activeMonth.month === new Date().getMonth() &&
+    activeMonth.year === new Date().getFullYear()
+  const todaySectionRef = useRef<HTMLDivElement>(null)
+
+  const goToToday = () => {
+    setActiveMonth({ month: new Date().getMonth(), year: new Date().getFullYear() })
+    setTimeout(() => todaySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
   const dailyBudget =
@@ -142,10 +295,7 @@ export default function HomePage() {
             className="text-lg font-bold bg-transparent outline-none border-b-2 border-positive w-40"
           />
         ) : (
-          <button
-            onClick={startEditing}
-            className="text-lg font-bold text-left"
-          >
+          <button onClick={startEditing} className="text-lg font-bold text-left">
             {userName || (
               <span className="text-[var(--text-muted)]">Tu nombre</span>
             )}
@@ -156,7 +306,7 @@ export default function HomePage() {
         </span>
       </div>
 
-      {/* Hero: Daily Budget */}
+      {/* Hero */}
       <div className="text-center mb-6">
         <p className="text-sm text-[var(--text-secondary)] mb-2">
           Disponible por día
@@ -170,12 +320,10 @@ export default function HomePage() {
         </p>
       </div>
 
-      {/* Chip */}
       <div className="flex justify-center mb-6">
         <Chip label="Días restantes" value={`${daysRemaining}`} />
       </div>
 
-      {/* Progress Bar */}
       <div className="mb-6">
         <ProgressBar progress={progress} colorMode="dynamic" />
         <p className="text-xs text-[var(--text-muted)] text-center mt-1">
@@ -183,109 +331,130 @@ export default function HomePage() {
         </p>
       </div>
 
-      {/* Register Button */}
       <Button fullWidth onClick={() => setModalOpen(true)}>
-        Registrar movimiento
+        + Anotar
       </Button>
 
-      {/* Transaction History */}
-      <div className="mt-6 flex-1">
-        <h2 className="text-sm font-semibold text-[var(--text-secondary)] mb-3">
+      {/* Movimientos */}
+      <div className="mt-6">
+        <h2 className="text-sm font-semibold text-[var(--text-secondary)] mb-4">
           Movimientos
         </h2>
-        <div className="h-[200px] overflow-y-auto space-y-2">
-          {transactions.length === 0 && (
-            <p className="text-center text-[var(--text-muted)] text-sm py-8">
-              No hay movimientos aún
-            </p>
-          )}
-          {transactions.map((t, i) => {
-            const opacity = Math.max(1 - i * 0.12, 0.3)
-            return (
-              <button
-                key={t.id}
-                className="flex items-center justify-between p-3 rounded-btn bg-[var(--bg-secondary)] w-full text-left"
-                style={{ opacity }}
-                onClick={() => setEditingTransaction(t)}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">
-                    {getCategoryEmoji(t.category_id)}
-                  </span>
-                  <p className="text-sm font-medium">{t.category_label}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`font-semibold text-sm ${
-                      t.type === 'income' ? 'text-positive' : 'text-negative'
-                    }`}
-                  >
-                    {t.type === 'income' ? '+' : '−'}$
-                    {t.amount.toLocaleString('es-MX', {
-                      minimumFractionDigits: 2,
-                    })}
-                  </span>
-                  <span className="text-xs text-[var(--text-muted)] w-12 text-right">
-                    {formatTransactionDate(t.date)}
-                  </span>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
 
-      {/* Floating Bottom Pill */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4">
-        <div
-          className="mx-auto max-w-app flex items-center justify-between rounded-[20px] px-8 py-3 backdrop-blur-xl"
-          style={{
-            background: 'var(--pill-bg)',
-            border: '0.5px solid var(--pill-border)',
-          }}
-        >
-          <Link
-            href="/settings"
-            className="flex flex-col items-center gap-1"
-            style={{ color: 'var(--pill-text)' }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        {/* Month Navigator */}
+        <div className="flex items-center justify-between mb-5">
+          <button onClick={() => setActiveMonth(prev)} className="p-2 text-[var(--text-muted)]">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
             </svg>
-            <span className="text-[10px] font-medium">Ajustes</span>
-          </Link>
-          <button
-            onClick={handleLogout}
-            className="flex flex-col items-center gap-1"
-            style={{ color: 'var(--pill-text)' }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
+          </button>
+
+          <div className="flex items-center gap-2">
+            {!isCurrentMonth && (
+              <button
+                onClick={goToToday}
+                className="text-[10px] font-medium text-positive px-2 py-0.5 rounded-full"
+                style={{ border: '0.5px solid rgba(22, 163, 74, 0.4)' }}
+              >
+                Hoy
+              </button>
+            )}
+            <button onClick={() => setActiveMonth(prev)} className="px-3 py-1 rounded-full text-xs font-medium text-[var(--text-muted)]">
+              {MONTHS_SHORT[prev.month]}
+            </button>
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--bg-secondary)] text-[var(--text-primary)]">
+              {MONTHS_SHORT[activeMonth.month]} {activeMonth.year !== today.getFullYear() ? activeMonth.year : ''}
+            </span>
+            <button onClick={() => setActiveMonth(next)} className="px-3 py-1 rounded-full text-xs font-medium text-[var(--text-muted)]">
+              {MONTHS_SHORT[next.month]}
+            </button>
+          </div>
+
+          <button onClick={() => setActiveMonth(next)} className="p-2 text-[var(--text-muted)]">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
             </svg>
-            <span className="text-[10px] font-medium">Salir</span>
           </button>
         </div>
+
+        {/* Unified List */}
+        {sections.length === 0 && (
+          <p className="text-center text-[var(--text-muted)] text-sm py-8">
+            Sin movimientos en {MONTHS_SHORT[activeMonth.month]}
+          </p>
+        )}
+
+        {sections.map((section) => {
+          const isTodaySection = section.label.startsWith('Hoy')
+          return (
+            <div key={section.label} className="mb-4" ref={isTodaySection ? todaySectionRef : undefined}>
+              <p
+                className="text-[10px] font-medium uppercase mb-2"
+                style={{ letterSpacing: '2px', color: 'var(--section-label)' }}
+              >
+                {section.label}
+              </p>
+
+              <div className="space-y-1.5">
+                {section.entries.map((entry) => {
+                  const isTransaction = entry.kind === 'transaction'
+
+                  const rowContent = (
+                    <div
+                      className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]"
+                      style={{ opacity: entry.projected ? 0.5 : 1 }}
+                    >
+                      {entry.projected ? (
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ border: '1.5px dashed var(--text-muted)' }} />
+                      ) : (
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${entry.type === 'income' ? 'bg-positive' : 'bg-negative'}`} />
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {isTransaction && (
+                            <span className="text-sm">{getCategoryEmoji(entry.transaction!.category_id)}</span>
+                          )}
+                          <p className="text-sm font-medium truncate">{entry.label}</p>
+                          {entry.badge && (
+                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--border-color)] text-[var(--text-muted)] shrink-0">
+                              {entry.badge}
+                            </span>
+                          )}
+                        </div>
+                        {entry.subtitle && (
+                          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{entry.subtitle}</p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`font-semibold text-sm ${entry.type === 'income' ? 'text-positive' : entry.projected ? 'text-[var(--text-secondary)]' : 'text-negative'}`}>
+                          {entry.type === 'income' ? '+' : '−'}${entry.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-[11px] text-[var(--text-muted)] w-11 text-right">
+                          {formatEntryDate(entry.date)}
+                        </span>
+                      </div>
+                    </div>
+                  )
+
+                  if (isTransaction) {
+                    return (
+                      <SwipeableRow
+                        key={entry.id}
+                        onTap={() => setEditingTransaction(entry.transaction!)}
+                        onDelete={() => deleteTransaction(entry.transaction!.id)}
+                      >
+                        {rowContent}
+                      </SwipeableRow>
+                    )
+                  }
+                  return <div key={entry.id}>{rowContent}</div>
+                })}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* Edit Transaction Modal */}

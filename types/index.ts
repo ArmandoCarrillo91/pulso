@@ -26,6 +26,8 @@ export interface Transaction {
   days_until_next_payday: number
 }
 
+export type PlanType = 'meta' | 'anual' | 'estacional'
+
 export interface Plan {
   id: string
   user_id: string
@@ -35,6 +37,11 @@ export interface Plan {
   time_value: number
   time_unit: 'fortnights' | 'months' | 'days'
   priority: number
+  plan_type: PlanType
+  start_date: string
+  target_date: string | null
+  current_amount: number
+  recurrence_month: number | null
 }
 
 export interface FixedExpense {

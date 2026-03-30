@@ -14,6 +14,7 @@
     --pill-bg: rgba(0, 0, 0, 0.04);
     --pill-border: rgba(0, 0, 0, 0.08);
     --pill-text: rgba(17, 24, 39, 0.4);
+    --section-label: rgba(0, 0, 0, 0.2);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -28,6 +29,7 @@
       --pill-bg: rgba(255, 255, 255, 0.04);
       --pill-border: rgba(255, 255, 255, 0.08);
       --pill-text: rgba(249, 250, 251, 0.4);
+      --section-label: rgba(255, 255, 255, 0.2);
     }
   }
 
