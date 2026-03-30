@@ -36,6 +36,8 @@ export interface CustomCategory extends Category {
 }
 
 const STORAGE_KEY = 'pulso_custom_categories'
+const HIDDEN_KEY = 'pulso_hidden_defaults'
+const OVERRIDES_KEY = 'pulso_category_overrides'
 
 export function loadCustomCategories(): CustomCategory[] {
   if (typeof window === 'undefined') return []
@@ -50,7 +52,60 @@ export function saveCustomCategories(categories: CustomCategory[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(categories))
 }
 
+// Hidden defaults: default categories the user chose to delete
+export function loadHiddenDefaults(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    return JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+export function saveHiddenDefaults(ids: string[]) {
+  localStorage.setItem(HIDDEN_KEY, JSON.stringify(ids))
+}
+
+// Overrides: default categories the user edited (emoji/label changes)
+export interface CategoryOverride {
+  id: string
+  emoji: string
+  label: string
+}
+
+export function loadOverrides(): CategoryOverride[] {
+  if (typeof window === 'undefined') return []
+  try {
+    return JSON.parse(localStorage.getItem(OVERRIDES_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+export function saveOverrides(overrides: CategoryOverride[]) {
+  localStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides))
+}
+
+// Get visible default categories with overrides applied
+export function getVisibleDefaults(type: 'income' | 'expense'): Category[] {
+  const defaults = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
+  const hidden = loadHiddenDefaults()
+  const overrides = loadOverrides()
+
+  return defaults
+    .filter((c) => !hidden.includes(c.id))
+    .map((c) => {
+      const ov = overrides.find((o) => o.id === c.id)
+      return ov ? { ...c, emoji: ov.emoji, label: ov.label } : c
+    })
+}
+
 export function getCategoryEmoji(categoryId: string): string {
+  // Check overrides first
+  const overrides = loadOverrides()
+  const ov = overrides.find((o) => o.id === categoryId)
+  if (ov) return ov.emoji
+
   const found = ALL_CATEGORIES.find((c) => c.id === categoryId)
   if (found) return found.emoji
 

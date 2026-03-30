@@ -9,7 +9,13 @@ import {
   getCategoryEmoji,
   loadCustomCategories,
   saveCustomCategories,
+  loadHiddenDefaults,
+  saveHiddenDefaults,
+  loadOverrides,
+  saveOverrides,
+  getVisibleDefaults,
   type CustomCategory,
+  type CategoryOverride,
 } from '@/lib/categories'
 import { getLocalDateString } from '@/lib/date'
 import { useFixedExpenses } from '@/hooks/useFixedExpenses'
@@ -50,7 +56,9 @@ export default function SettingsPage() {
   // Categories management
   const [catTab, setCatTab] = useState<'expense' | 'income'>('expense')
   const [customCats, setCustomCats] = useState(() => loadCustomCategories())
-  const [editingCat, setEditingCat] = useState<CustomCategory | null>(null)
+  const [hiddenDefaults, setHiddenDefaults] = useState(() => loadHiddenDefaults())
+  const [overrides, setOverrides] = useState(() => loadOverrides())
+  const [editingCatId, setEditingCatId] = useState<string | null>(null)
   const [editCatEmoji, setEditCatEmoji] = useState('')
   const [editCatName, setEditCatName] = useState('')
 
@@ -93,40 +101,70 @@ export default function SettingsPage() {
   }
 
   // Category management helpers
-  const defaultCats =
-    catTab === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES
+  const defaults = catTab === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES
+  const visibleDefaults = defaults
+    .filter((c) => !hiddenDefaults.includes(c.id))
+    .map((c) => {
+      const ov = overrides.find((o) => o.id === c.id)
+      return ov ? { ...c, emoji: ov.emoji, label: ov.label } : c
+    })
   const customForTab = customCats.filter((c) => c.type === catTab)
+  const allCatsForTab = [...visibleDefaults, ...customForTab]
 
-  const startEditCat = (cat: CustomCategory) => {
-    setEditingCat(cat)
+  const isDefaultId = (id: string) =>
+    [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].some((c) => c.id === id)
+
+  const startEditCat = (cat: { id: string; emoji: string; label: string }) => {
+    setEditingCatId(cat.id)
     setEditCatEmoji(cat.emoji)
     setEditCatName(cat.label)
   }
 
   const saveEditCat = async () => {
-    if (!editingCat || !editCatName.trim()) return
+    if (!editingCatId || !editCatName.trim()) return
     const newLabel = editCatName.trim()
-    const newEmoji = editCatEmoji.trim() || editingCat.emoji
+    const newEmoji = editCatEmoji.trim() || '📦'
 
-    const updated = customCats.map((c) =>
-      c.id === editingCat.id ? { ...c, label: newLabel, emoji: newEmoji } : c
-    )
-    saveCustomCategories(updated)
-    setCustomCats(updated)
+    if (isDefaultId(editingCatId)) {
+      // Save as override
+      const updated = [
+        ...overrides.filter((o) => o.id !== editingCatId),
+        { id: editingCatId, emoji: newEmoji, label: newLabel },
+      ]
+      saveOverrides(updated)
+      setOverrides(updated)
+    } else {
+      // Update custom category
+      const updated = customCats.map((c) =>
+        c.id === editingCatId ? { ...c, label: newLabel, emoji: newEmoji } : c
+      )
+      saveCustomCategories(updated)
+      setCustomCats(updated)
+    }
 
     // Update label on existing transactions
     await supabase
       .from('transactions')
       .update({ category_label: newLabel })
-      .eq('category_id', editingCat.id)
+      .eq('category_id', editingCatId)
 
-    setEditingCat(null)
+    setEditingCatId(null)
   }
 
-  const deleteCustomCat = (id: string) => {
-    const updated = customCats.filter((c) => c.id !== id)
-    saveCustomCategories(updated)
-    setCustomCats(updated)
+  const deleteCat = (id: string) => {
+    if (isDefaultId(id)) {
+      const updated = [...hiddenDefaults, id]
+      saveHiddenDefaults(updated)
+      setHiddenDefaults(updated)
+      // Also remove any override
+      const ov = overrides.filter((o) => o.id !== id)
+      saveOverrides(ov)
+      setOverrides(ov)
+    } else {
+      const updated = customCats.filter((c) => c.id !== id)
+      saveCustomCategories(updated)
+      setCustomCats(updated)
+    }
   }
 
   return (
@@ -290,7 +328,6 @@ export default function SettingsPage() {
       <section>
         <h2 className="text-base font-bold mb-4">Categorías</h2>
 
-        {/* Tabs */}
         <div className="flex gap-2 mb-4">
           <button
             className={`flex-1 py-2 text-sm font-semibold rounded-btn transition-colors ${
@@ -314,70 +351,53 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        {/* Default categories */}
-        <div className="space-y-1.5 mb-3">
-          {defaultCats.map((cat) => (
-            <div
-              key={cat.id}
-              className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]"
-            >
-              <span className="text-lg">{cat.emoji}</span>
-              <p className="text-sm font-medium flex-1">{cat.label}</p>
-              <span className="text-[var(--text-muted)] text-xs">🔒</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Custom categories */}
-        {customForTab.length > 0 && (
-          <div className="space-y-1.5">
-            {customForTab.map((cat) =>
-              editingCat?.id === cat.id ? (
-                <div
-                  key={cat.id}
-                  className="flex items-center gap-2 p-2 rounded-btn bg-[var(--bg-secondary)]"
+        <div className="space-y-1.5">
+          {allCatsForTab.map((cat) =>
+            editingCatId === cat.id ? (
+              <div
+                key={cat.id}
+                className="flex items-center gap-2 p-2 rounded-btn bg-[var(--bg-secondary)]"
+              >
+                <input
+                  type="text"
+                  value={editCatEmoji}
+                  onChange={(e) => setEditCatEmoji(e.target.value)}
+                  className="input-field w-12 text-center text-lg px-1 py-1"
+                />
+                <input
+                  type="text"
+                  value={editCatName}
+                  onChange={(e) => setEditCatName(e.target.value)}
+                  className="input-field flex-1 py-1"
+                  autoFocus
+                />
+                <button
+                  className="text-positive font-semibold text-xs px-2"
+                  onClick={saveEditCat}
                 >
-                  <input
-                    type="text"
-                    value={editCatEmoji}
-                    onChange={(e) => setEditCatEmoji(e.target.value)}
-                    className="input-field w-12 text-center text-lg px-1 py-1"
-                  />
-                  <input
-                    type="text"
-                    value={editCatName}
-                    onChange={(e) => setEditCatName(e.target.value)}
-                    className="input-field flex-1 py-1"
-                    autoFocus
-                  />
-                  <button
-                    className="text-positive font-semibold text-xs px-2"
-                    onClick={saveEditCat}
-                  >
-                    ✓
-                  </button>
-                  <button
-                    className="text-[var(--text-muted)] text-xs px-2"
-                    onClick={() => setEditingCat(null)}
-                  >
-                    ✕
-                  </button>
+                  ✓
+                </button>
+                <button
+                  className="text-[var(--text-muted)] text-xs px-2"
+                  onClick={() => setEditingCatId(null)}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <SwipeableRow
+                key={cat.id}
+                onEdit={() => startEditCat(cat)}
+                onDelete={() => deleteCat(cat.id)}
+              >
+                <div className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]">
+                  <span className="text-lg">{cat.emoji}</span>
+                  <p className="text-sm font-medium flex-1">{cat.label}</p>
                 </div>
-              ) : (
-                <SwipeableRow
-                  key={cat.id}
-                  onEdit={() => startEditCat(cat)}
-                  onDelete={() => deleteCustomCat(cat.id)}
-                >
-                  <div className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]">
-                    <span className="text-lg">{cat.emoji}</span>
-                    <p className="text-sm font-medium flex-1">{cat.label}</p>
-                  </div>
-                </SwipeableRow>
-              )
-            )}
-          </div>
-        )}
+              </SwipeableRow>
+            )
+          )}
+        </div>
       </section>
 
       <EditExpenseModal
