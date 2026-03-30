@@ -34,7 +34,6 @@ interface LogEntry {
   badge?: string
   badgeColor?: 'muted' | 'amber' | 'positive'
   projected: boolean
-  paid?: boolean
   transaction?: Transaction
   fixedExpense?: FixedExpense
 }
@@ -122,8 +121,15 @@ export default function HomePage() {
     clearToast,
   } = useTransactions()
   const { plans, totalSavingsPerFortnight } = usePlans()
-  const { expenses, createExpense } = useFixedExpenses()
-  const { daysRemaining, progress, previousPayday, currentFortnight, nextPayday } = usePayday()
+  const { expenses, createExpense, updateExpense: updateFixedExpense } = useFixedExpenses()
+
+  // Find last income date (quincena/salary) to detect if current fortnight income is already registered
+  const lastIncomeDate = useMemo(() => {
+    const income = transactions.find((t) => t.type === 'income')
+    return income?.date ?? null
+  }, [transactions])
+
+  const { daysRemaining, progress, previousPayday, currentFortnight, nextPayday } = usePayday(lastIncomeDate)
 
   const supabase = createClient()
 
@@ -191,28 +197,23 @@ export default function HomePage() {
 
     await createTransaction(transaction)
 
-    // Update the fixed expense record
-    const updates: Record<string, unknown> = { last_paid_date: selectedDate }
+    // Update the fixed expense record via context (optimistic UI)
+    const expenseUpdates: Partial<FixedExpense> = { last_paid_date: selectedDate }
 
     if (confirmingExpense.expense_type === 'msi') {
       const newPaid = (confirmingExpense.paid_installments || 0) + 1
       const total = confirmingExpense.total_installments || 0
-      updates.paid_installments = newPaid
+      expenseUpdates.paid_installments = newPaid
       if (newPaid >= total) {
-        // Fully paid — mark as completed
-        updates.completed_at = new Date().toISOString()
+        expenseUpdates.completed_at = new Date().toISOString()
       } else {
-        // Advance next_payment_date to next month same day
         const nextDate = new Date(selectedDate + 'T12:00:00')
         nextDate.setMonth(nextDate.getMonth() + 1)
-        updates.next_payment_date = getLocalDateString(nextDate)
+        expenseUpdates.next_payment_date = getLocalDateString(nextDate)
       }
     }
 
-    await supabase
-      .from('fixed_expenses')
-      .update(updates)
-      .eq('id', confirmingExpense.id)
+    await updateFixedExpense(confirmingExpense.id, expenseUpdates)
 
     setConfirmSaving(false)
     setConfirmingExpense(null)
@@ -259,9 +260,11 @@ export default function HomePage() {
         if (exp.start_date && dateStr < exp.start_date.slice(0, 7) + '-01') return []
         if (exp.end_date && dateStr > exp.end_date) return []
 
+        // Already paid this month → real transaction shows in history, skip projection
         const paidThisMonth = exp.last_paid_date
           ? isInMonth(exp.last_paid_date, am, ay)
           : false
+        if (paidThisMonth) return []
 
         return [{
           id: `fixed-${exp.id}`,
@@ -272,18 +275,18 @@ export default function HomePage() {
           subtitle: `${paid} de ${total} pagos`,
           amount: exp.amount,
           type: 'expense' as const,
-          badge: paidThisMonth ? 'pagado' : 'MSI',
-          badgeColor: paidThisMonth ? 'positive' : 'amber',
-          projected: !paidThisMonth,
-          paid: paidThisMonth,
+          badge: 'MSI',
+          badgeColor: 'amber' as const,
+          projected: true,
           fixedExpense: exp,
         }]
       }
 
-      // Regular fixed expense
+      // Regular fixed expense — already paid this month → skip projection
       const paidThisMonth = exp.last_paid_date
         ? isInMonth(exp.last_paid_date, am, ay)
         : false
+      if (paidThisMonth) return []
 
       return [{
         id: `fixed-${exp.id}`,
@@ -294,9 +297,8 @@ export default function HomePage() {
         subtitle: `día ${exp.day_of_month}`,
         amount: exp.amount,
         type: 'expense' as const,
-        badge: paidThisMonth ? 'pagado' : 'gasto fijo',
-        projected: !paidThisMonth,
-        paid: paidThisMonth,
+        badge: 'gasto fijo',
+        projected: true,
         fixedExpense: exp,
       }]
     })
@@ -430,6 +432,43 @@ export default function HomePage() {
   if (burnPct < timePct - 0.1) burnColor = '#16a34a' // green — ahead
   else if (burnPct > timePct + 0.1) burnColor = '#dc2626' // red — overspending
 
+  // ─── Three-line fortnight snapshot ───
+  const incomeThisFortnight = transactions
+    .filter((t) => t.type === 'income' && t.date >= prevPaydayStr)
+    .reduce((sum, t) => sum + t.amount, 0)
+
+  const committedThisFortnight = totalSavingsPerFortnight + fixedThisPeriod + msiPerFortnight
+
+  const freeThisFortnight = incomeThisFortnight - committedThisFortnight
+
+  // ─── Historical average daily spend ───
+  const historicalAvgDaily = useMemo(() => {
+    // Get all expenses BEFORE the current fortnight's start (previousPayday)
+    const prevExpenses = transactions.filter(
+      (t) => t.type === 'expense' && t.date < prevPaydayStr
+    )
+    if (prevExpenses.length === 0) return null
+
+    const totalPrevExpenses = prevExpenses.reduce((sum, t) => sum + t.amount, 0)
+
+    // Find the earliest expense date to calculate total days
+    const earliestDate = prevExpenses.reduce(
+      (min, t) => (t.date < min ? t.date : min),
+      prevExpenses[0].date
+    )
+    const earliest = new Date(earliestDate + 'T12:00:00')
+    const periodEnd = new Date(prevPaydayStr + 'T12:00:00')
+    const totalDaysHistory = Math.max(
+      Math.ceil((periodEnd.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24)),
+      1
+    )
+
+    return totalPrevExpenses / totalDaysHistory
+  }, [transactions, prevPaydayStr])
+
+  // ─── End of fortnight mode ───
+  const isEndOfFortnight = daysRemaining <= 3
+
   const today = new Date()
   const dateStr = today.toLocaleDateString('es-MX', {
     weekday: 'long',
@@ -438,9 +477,9 @@ export default function HomePage() {
   })
 
   return (
-    <div className="flex flex-col min-h-screen p-4" style={{ paddingBottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
+    <div className="flex flex-col h-screen p-4 overflow-hidden" style={{ paddingBottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
       {/* Top Bar */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 shrink-0">
         {editingName ? (
           <input
             ref={nameInputRef}
@@ -465,6 +504,7 @@ export default function HomePage() {
       </div>
 
       {/* Hero */}
+      <div className="shrink-0">
       {loading ? (
         <>
           <HeroSkeleton />
@@ -472,27 +512,54 @@ export default function HomePage() {
         </>
       ) : (
         <>
-          <div className="text-center mb-8">
+          <div className="text-center mb-4">
             <p className="text-sm text-[var(--text-secondary)] mb-2">
-              Disponible por día
+              {isEndOfFortnight ? 'Últimos días de quincena' : 'Disponible por día'}
             </p>
             <p
-              className={`text-5xl font-bold mb-5 ${
-                dailyBudget >= 0 ? 'text-positive' : 'text-negative'
+              className={`text-5xl font-bold mb-3 ${
+                dailyBudget < 0
+                  ? 'text-negative'
+                  : isEndOfFortnight
+                    ? 'text-amber-500'
+                    : 'text-positive'
               }`}
             >
               {formatMoney(dailyBudget)}
             </p>
-
-            <p className="text-xs text-[var(--text-muted)] mb-1.5">
+            <p className="text-xs text-[var(--text-muted)]">
               {daysRemaining} {daysRemaining === 1 ? 'día restante' : 'días restantes'}
-            </p>
-            <p className="text-sm font-semibold text-[var(--text-secondary)]">
-              Total {formatMoney(currentBalance)}
             </p>
           </div>
 
-          <div className="mb-6">
+          {/* Three-line fortnight snapshot */}
+          <div
+            className="mb-4 py-3 px-3"
+            style={isEndOfFortnight ? { borderLeft: '3px solid #f59e0b', paddingLeft: '11px' } : undefined}
+          >
+            <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
+              <span>Ingresado</span>
+              <span>{formatMoney(incomeThisFortnight)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1.5">
+              <span>Comprometido</span>
+              <span>{formatMoney(committedThisFortnight)}</span>
+            </div>
+            <div className="h-px bg-[var(--border-color)] mb-1.5" />
+            <div className="flex justify-between text-xs">
+              <span className="text-[var(--text-secondary)] font-medium">Libre</span>
+              <span className="text-[var(--text-secondary)] font-medium">{formatMoney(freeThisFortnight)}</span>
+            </div>
+          </div>
+
+          {isEndOfFortnight && (
+            <p className="text-xs text-[var(--text-muted)] text-center mb-4">
+              Quedan {daysRemaining} días — gasta con intención
+            </p>
+          )}
+
+          {/* Burn rate bar */}
+          <div className="mb-4">
             <div className="h-1.5 rounded-full bg-[var(--bg-secondary)] overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-500"
@@ -510,22 +577,30 @@ export default function HomePage() {
                 Disponible {formatMoney(currentBalance)}
               </span>
             </div>
+            {historicalAvgDaily !== null && (
+              <p className="text-[11px] text-[var(--text-muted)] mt-1.5">
+                Promedio histórico: {formatMoney(historicalAvgDaily)}/día
+              </p>
+            )}
           </div>
         </>
       )}
+      </div>
 
-      <Button fullWidth onClick={() => setModalOpen(true)}>
-        + Anotar
-      </Button>
+      <div className="shrink-0">
+        <Button fullWidth onClick={() => setModalOpen(true)}>
+          + Anotar
+        </Button>
+      </div>
 
       {/* Movimientos */}
-      <div className="mt-6">
-        <h2 className="text-sm font-semibold text-[var(--text-secondary)] mb-4">
+      <div className="mt-6 flex flex-col flex-1 min-h-0">
+        <h2 className="text-sm font-semibold text-[var(--text-secondary)] mb-4 shrink-0">
           Movimientos
         </h2>
 
         {/* Month Navigator */}
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-3 shrink-0">
           <button onClick={() => setActiveMonth(prev)} className="p-2 text-[var(--text-muted)]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
@@ -560,110 +635,106 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* Unified List */}
-        {loading && <TransactionListSkeleton />}
-        {!loading && sections.length === 0 && (
-          <p className="text-center text-[var(--text-muted)] text-sm py-8">
-            Sin movimientos en {MONTHS_SHORT[activeMonth.month]}
-          </p>
-        )}
+        {/* Scrollable list — only this area scrolls */}
+        <div className="flex-1 overflow-y-auto min-h-0 -mx-4 px-4" style={{ paddingBottom: '16px' }}>
+          {loading && <TransactionListSkeleton />}
+          {!loading && sections.length === 0 && (
+            <p className="text-center text-[var(--text-muted)] text-sm py-8">
+              Sin movimientos en {MONTHS_SHORT[activeMonth.month]}
+            </p>
+          )}
 
-        {sections.map((section) => {
-          const isTodaySection = section.label.startsWith('Hoy')
-          return (
-            <div key={section.label} className="mb-4" ref={isTodaySection ? todaySectionRef : undefined}>
-              <p
-                className="text-[10px] font-medium uppercase mb-2"
-                style={{ letterSpacing: '2px', color: 'var(--section-label)' }}
-              >
-                {section.label}
-              </p>
+          {sections.map((section) => {
+            const isTodaySection = section.label.startsWith('Hoy')
+            return (
+              <div key={section.label} className="mb-4" ref={isTodaySection ? todaySectionRef : undefined}>
+                <p
+                  className="text-[10px] font-medium uppercase mb-2"
+                  style={{ letterSpacing: '2px', color: 'var(--section-label)' }}
+                >
+                  {section.label}
+                </p>
 
-              <div className="space-y-1.5">
-                {section.entries.map((entry) => {
-                  const isTransaction = entry.kind === 'transaction'
-                  const isFixedUnpaid = entry.kind === 'fixed' && !entry.paid
+                <div className="space-y-1.5">
+                  {section.entries.map((entry) => {
+                    const isTransaction = entry.kind === 'transaction'
+                    const isFixedUnpaid = entry.kind === 'fixed' && entry.projected
 
-                  const rowContent = (
-                    <div
-                      className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]"
-                      style={{ opacity: entry.projected && !entry.paid ? 0.5 : entry.paid ? 0.4 : 1 }}
-                    >
-                      {entry.paid ? (
-                        <span className="w-4 h-4 rounded-full bg-positive/20 flex items-center justify-center shrink-0">
-                          <span className="text-[10px] text-positive">✓</span>
-                        </span>
-                      ) : entry.projected ? (
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ border: '1.5px dashed var(--text-muted)' }} />
-                      ) : (
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${entry.type === 'income' ? 'bg-positive' : 'bg-negative'}`} />
-                      )}
+                    const rowContent = (
+                      <div
+                        className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]"
+                        style={{ opacity: entry.projected ? 0.5 : 1 }}
+                      >
+                        {entry.projected ? (
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ border: '1.5px dashed var(--text-muted)' }} />
+                        ) : (
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${entry.type === 'income' ? 'bg-positive' : 'bg-negative'}`} />
+                        )}
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {entry.emoji && (
-                            <span className="text-sm">{entry.emoji}</span>
-                          )}
-                          <p className={`text-sm font-medium truncate ${entry.paid ? 'line-through' : ''}`}>{entry.label}</p>
-                          {entry.badge && (
-                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
-                              entry.paid
-                                ? 'bg-positive/10 text-positive'
-                                : entry.badgeColor === 'amber'
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            {entry.emoji && (
+                              <span className="text-sm">{entry.emoji}</span>
+                            )}
+                            <p className="text-sm font-medium truncate">{entry.label}</p>
+                            {entry.badge && (
+                              <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
+                                entry.badgeColor === 'amber'
                                   ? 'bg-amber-500/10 text-amber-500'
                                   : 'bg-[var(--border-color)] text-[var(--text-muted)]'
-                            }`}>
-                              {entry.paid ? '✓ Pagado' : entry.badge}
-                            </span>
+                              }`}>
+                                {entry.badge}
+                              </span>
+                            )}
+                          </div>
+                          {entry.subtitle && (
+                            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{entry.subtitle}</p>
                           )}
                         </div>
-                        {entry.subtitle && (
-                          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{entry.subtitle}</p>
-                        )}
-                      </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        {isFixedUnpaid && (
-                          <button
-                            className="text-[10px] font-semibold text-positive px-2 py-1 rounded-btn"
-                            style={{ border: '0.5px solid rgba(22, 163, 74, 0.3)' }}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setConfirmingExpense(entry.fixedExpense!)
-                              setConfirmDate(getLocalDateString())
-                              setConfirmNote('')
-                            }}
-                          >
-                            ✓ Confirmar
-                          </button>
-                        )}
-                        <span className={`font-semibold text-sm ${entry.type === 'income' ? 'text-positive' : entry.projected ? 'text-[var(--text-secondary)]' : 'text-negative'}`}>
-                          {entry.type === 'income' ? '+' : '−'}${entry.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                        </span>
-                        <span className="text-[11px] text-[var(--text-muted)] w-11 text-right">
-                          {formatEntryDate(entry.date)}
-                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isFixedUnpaid && (
+                            <button
+                              className="text-[10px] font-semibold text-positive px-2 py-1 rounded-btn"
+                              style={{ border: '0.5px solid rgba(22, 163, 74, 0.3)' }}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setConfirmingExpense(entry.fixedExpense!)
+                                setConfirmDate(getLocalDateString())
+                                setConfirmNote('')
+                              }}
+                            >
+                              ✓ Confirmar
+                            </button>
+                          )}
+                          <span className={`font-semibold text-sm ${entry.type === 'income' ? 'text-positive' : entry.projected ? 'text-[var(--text-secondary)]' : 'text-negative'}`}>
+                            {entry.type === 'income' ? '+' : '−'}${entry.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                          </span>
+                          <span className="text-[11px] text-[var(--text-muted)] w-11 text-right">
+                            {formatEntryDate(entry.date)}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  )
-
-                  if (isTransaction) {
-                    return (
-                      <SwipeableRow
-                        key={entry.id}
-                        onEdit={() => setEditingTransaction(entry.transaction!)}
-                        onDelete={() => deleteTransaction(entry.transaction!.id)}
-                      >
-                        {rowContent}
-                      </SwipeableRow>
                     )
-                  }
-                  return <div key={entry.id}>{rowContent}</div>
-                })}
+
+                    if (isTransaction) {
+                      return (
+                        <SwipeableRow
+                          key={entry.id}
+                          onEdit={() => setEditingTransaction(entry.transaction!)}
+                          onDelete={() => deleteTransaction(entry.transaction!.id)}
+                        >
+                          {rowContent}
+                        </SwipeableRow>
+                      )
+                    }
+                    return <div key={entry.id}>{rowContent}</div>
+                  })}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
 
       {/* Confirm Payment Modal */}

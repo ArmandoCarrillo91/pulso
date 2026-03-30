@@ -25,7 +25,30 @@ function getPaydaysForMonth(year: number, month: number): [Date, Date] {
   return [first, second]
 }
 
-export function usePayday() {
+/**
+ * Get the next payday after a given date.
+ */
+function getNextPaydayAfter(date: Date): Date {
+  const y = date.getFullYear()
+  const m = date.getMonth()
+  const [first, second] = getPaydaysForMonth(y, m)
+
+  if (date < first) return first
+  if (date < second) return second
+
+  // Next month's first payday
+  const nm = m === 11 ? 0 : m + 1
+  const ny = m === 11 ? y + 1 : y
+  return getPaydaysForMonth(ny, nm)[0]
+}
+
+/**
+ * Calculate payday information.
+ * @param lastIncomeDate - Date string (YYYY-MM-DD) of most recent quincena/salary income.
+ *   If provided and it falls on or after the previous payday, we know the user already
+ *   received this fortnight's income, so we advance to the next period.
+ */
+export function usePayday(lastIncomeDate?: string | null) {
   return useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -63,6 +86,19 @@ export function usePayday() {
       currentFortnight = 1
     }
 
+    // If user already received income for this fortnight, advance to next period
+    if (lastIncomeDate) {
+      const incomeDate = new Date(lastIncomeDate + 'T12:00:00')
+      incomeDate.setHours(0, 0, 0, 0)
+
+      if (incomeDate >= previousPayday) {
+        // Income received in current period — advance
+        previousPayday = nextPayday
+        nextPayday = getNextPaydayAfter(new Date(nextPayday.getTime() + 86400000))
+        currentFortnight = currentFortnight === 1 ? 2 : 1
+      }
+    }
+
     // Days remaining including today
     const diffMs = nextPayday.getTime() - today.getTime()
     const daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1, 1)
@@ -85,5 +121,5 @@ export function usePayday() {
       totalDays,
       elapsedDays,
     }
-  }, [])
+  }, [lastIncomeDate])
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { usePlans } from '@/hooks/usePlans'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePayday } from '@/hooks/usePayday'
@@ -53,8 +53,14 @@ export default function PlanesPage() {
     toastMsg,
     clearToast,
   } = usePlans()
-  const { currentBalance } = useTransactions()
-  const { daysRemaining, nextPayday } = usePayday()
+  const { transactions, currentBalance } = useTransactions()
+
+  const lastIncomeDate = useMemo(() => {
+    const income = transactions.find((t) => t.type === 'income')
+    return income?.date ?? null
+  }, [transactions])
+
+  const { daysRemaining, nextPayday } = usePayday(lastIncomeDate)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
 
