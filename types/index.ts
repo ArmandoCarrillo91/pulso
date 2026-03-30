@@ -24,6 +24,7 @@ export interface Transaction {
   balance_after: number
   days_since_last_income: number | null
   days_until_next_payday: number
+  source?: 'manual' | 'automated' | 'api' | 'import'
 }
 
 export type PlanType = 'meta' | 'anual' | 'estacional'

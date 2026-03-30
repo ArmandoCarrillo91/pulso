@@ -23,12 +23,8 @@ export default function SwipeableRow({
   const startY = useRef(0)
   const swiping = useRef(false)
   const decided = useRef(false)
-  const lockedDir = useRef<'left' | 'right' | null>(null)
 
-  const reset = useCallback(() => {
-    setOffset(0)
-    lockedDir.current = null
-  }, [])
+  const reset = useCallback(() => setOffset(0), [])
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX
@@ -55,78 +51,54 @@ export default function SwipeableRow({
 
     if (!swiping.current) return
 
-    // Clamp: negative = swipe left (delete), positive = swipe right (edit)
-    const base = lockedDir.current === 'left' ? -72 : lockedDir.current === 'right' ? 72 : 0
-    const raw = base + dx
-    const clamped = Math.max(-150, Math.min(raw, onEdit ? 150 : 0))
-    setOffset(deletable ? clamped : Math.max(0, clamped))
+    // Negative = swipe left (delete), positive = swipe right (edit)
+    const maxLeft = deletable ? -160 : 0
+    const maxRight = onEdit ? 160 : 0
+    setOffset(Math.max(maxLeft, Math.min(dx, maxRight)))
   }
 
   const handleTouchEnd = () => {
     if (!swiping.current) {
-      if (lockedDir.current) reset()
-      return
-    }
-
-    // Auto-trigger at 140px
-    if (offset <= -140 && deletable) {
-      setShowConfirm(true)
       reset()
       return
     }
-    if (offset >= 140 && onEdit) {
+
+    // Past threshold → trigger action immediately
+    if (offset <= -120 && deletable) {
+      reset()
+      setShowConfirm(true)
+      return
+    }
+    if (offset >= 120 && onEdit) {
       reset()
       onEdit()
       return
     }
 
-    // Lock at 72px threshold
-    if (offset <= -72 && deletable) {
-      setOffset(-72)
-      lockedDir.current = 'left'
-    } else if (offset >= 72 && onEdit) {
-      setOffset(72)
-      lockedDir.current = 'right'
-    } else {
-      reset()
-    }
-  }
-
-  const handleDeleteTap = () => {
-    setShowConfirm(true)
-  }
-
-  const handleEditTap = () => {
+    // Under threshold → snap back
     reset()
-    onEdit?.()
   }
 
   return (
     <>
       <div className="relative overflow-hidden rounded-btn">
-        {/* Left side: red delete (revealed on swipe left) */}
+        {/* Red delete background (left side) */}
         {deletable && (
-          <button
-            className="absolute inset-y-0 left-0 w-24 bg-negative flex flex-col items-center justify-center gap-1 text-white text-[10px] font-semibold rounded-l-btn"
-            onClick={handleDeleteTap}
-          >
+          <div className="absolute inset-y-0 left-0 w-full bg-negative flex items-center pl-5 gap-2 text-white text-[10px] font-semibold rounded-btn">
             <span>🗑</span>
             Eliminar
-          </button>
+          </div>
         )}
 
-        {/* Right side: green edit (revealed on swipe right) */}
+        {/* Green edit background (right side) */}
         {onEdit && (
-          <button
-            className="absolute inset-y-0 right-0 w-24 bg-positive flex flex-col items-center justify-center gap-1 text-white text-[10px] font-semibold rounded-r-btn"
-            onClick={handleEditTap}
-          >
-            <span>✏️</span>
+          <div className="absolute inset-y-0 right-0 w-full bg-positive flex items-center justify-end pr-5 gap-2 text-white text-[10px] font-semibold rounded-btn">
             Editar
-          </button>
+            <span>✏️</span>
+          </div>
         )}
 
-        {/* Content */}
+        {/* Swipeable content */}
         <div
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
@@ -143,8 +115,8 @@ export default function SwipeableRow({
       <ConfirmDialog
         isOpen={showConfirm}
         message="¿Eliminar este registro?"
-        onConfirm={() => { setShowConfirm(false); reset(); onDelete() }}
-        onCancel={() => { setShowConfirm(false); reset() }}
+        onConfirm={() => { setShowConfirm(false); onDelete() }}
+        onCancel={() => setShowConfirm(false)}
       />
     </>
   )

@@ -70,7 +70,7 @@ export default function PlanesPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
 
   return (
-    <div className="min-h-screen p-4 pb-24">
+    <div className="min-h-screen p-4" style={{ paddingBottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
       <div className="mb-6">
         <h1 className="text-lg font-bold">Mis planes</h1>
       </div>

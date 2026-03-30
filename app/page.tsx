@@ -15,7 +15,6 @@ import SwipeableRow from '@/components/ui/SwipeableRow'
 import Toast from '@/components/ui/Toast'
 import type { Transaction } from '@/types'
 import Button from '@/components/ui/Button'
-import Chip from '@/components/ui/Chip'
 
 const MONTHS_SHORT = [
   'ene', 'feb', 'mar', 'abr', 'may', 'jun',
@@ -290,6 +289,21 @@ export default function HomePage() {
   if (burnPct < timePct - 0.1) burnColor = '#16a34a' // green — ahead
   else if (burnPct > timePct + 0.1) burnColor = '#dc2626' // red — overspending
 
+  // Trend: compare spending vs previous fortnight
+  // Previous fortnight = transactions between the payday before previousPayday and previousPayday
+  const prevPrevPayday = new Date(previousPayday)
+  prevPrevPayday.setDate(prevPrevPayday.getDate() - 15)
+  const prevPrevStr = getLocalDateString(prevPrevPayday)
+  const lastFortnightSpent = transactions
+    .filter(
+      (t) =>
+        t.type === 'expense' &&
+        t.date >= prevPrevStr &&
+        t.date < prevPaydayStr
+    )
+    .reduce((sum, t) => sum + t.amount, 0)
+  const trendDiff = lastFortnightSpent > 0 ? spentThisPeriod - lastFortnightSpent : null
+
   const today = new Date()
   const dateStr = today.toLocaleDateString('es-MX', {
     weekday: 'long',
@@ -306,7 +320,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen p-4 pb-24">
+    <div className="flex flex-col min-h-screen p-4" style={{ paddingBottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
       {/* Top Bar */}
       <div className="flex items-center justify-between mb-8">
         {editingName ? (
@@ -333,23 +347,34 @@ export default function HomePage() {
       </div>
 
       {/* Hero */}
-      <div className="text-center mb-6">
+      <div className="text-center mb-8">
         <p className="text-sm text-[var(--text-secondary)] mb-2">
           Disponible por día
         </p>
         <p
-          className={`text-5xl font-bold ${
+          className={`text-5xl font-bold mb-5 ${
             dailyBudget >= 0 ? 'text-positive' : 'text-negative'
           }`}
         >
           {formatMoney(dailyBudget)}
         </p>
-      </div>
 
-      <div className="flex justify-center gap-3 mb-6">
-        <Chip label="Días restantes" value={`${daysRemaining}`} />
-        {carryover !== null && carryover > 0 && (
-          <Chip label="Quincena anterior" value={`+${formatMoney(carryover)}`} />
+        <p className="text-xs text-[var(--text-muted)] mb-1.5">
+          {daysRemaining} {daysRemaining === 1 ? 'día restante' : 'días restantes'}
+        </p>
+        <p className="text-sm font-semibold text-[var(--text-secondary)] mb-1.5">
+          {formatMoney(currentBalance)} disponibles hasta quincena
+        </p>
+        {trendDiff !== null && (
+          <p
+            className={`text-xs ${
+              trendDiff > 0 ? 'text-negative' : 'text-positive'
+            }`}
+          >
+            {trendDiff > 0
+              ? `↑ ${formatMoney(trendDiff)} más que la quincena pasada`
+              : `↓ ${formatMoney(Math.abs(trendDiff))} menos que la quincena pasada`}
+          </p>
         )}
       </div>
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getLocalDateString } from '@/lib/date'
+import { detectPlatform } from '@/lib/utils'
 import {
   INCOME_CATEGORIES,
   EXPENSE_CATEGORIES,
@@ -64,6 +65,7 @@ export default function TransactionModal({
 
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>([])
   const [showCustomForm, setShowCustomForm] = useState(false)
+  const [showMore, setShowMore] = useState(false)
   const [customEmoji, setCustomEmoji] = useState('')
   const [customName, setCustomName] = useState('')
 
@@ -91,6 +93,7 @@ export default function TransactionModal({
       setIsRecurring(false)
       setRecurringDay('')
       setShowCustomForm(false)
+      setShowMore(false)
       setCustomEmoji('')
       setCustomName('')
 
@@ -184,7 +187,8 @@ export default function TransactionModal({
       geo_lat: geoLat,
       geo_lng: geoLng,
       geo_accuracy: geoAccuracy,
-      platform: navigator.userAgent,
+      platform: detectPlatform(),
+      source: 'manual',
       entry_seconds: entrySeconds,
       category_changes: categoryChanges,
       had_note: note.trim().length > 0,
@@ -239,11 +243,20 @@ export default function TransactionModal({
   const customForType = customCategories.filter((c) => c.type === type)
   const allCategories = [...defaultCategories, ...customForType]
 
-  const used = allCategories
+  const hasAnyTransactions = Object.values(categoryCounts).some((c) => c > 0)
+  const usedCategories = allCategories
     .filter((c) => (categoryCounts[c.id] || 0) > 0)
     .sort((a, b) => (categoryCounts[b.id] || 0) - (categoryCounts[a.id] || 0))
-  const unused = allCategories.filter((c) => !categoryCounts[c.id])
-  const categories = [...used, ...unused]
+  const unusedCategories = allCategories.filter((c) => !categoryCounts[c.id])
+
+  // Onboarding: show all defaults. Otherwise: only used.
+  const isOnboarding = !hasAnyTransactions
+  const gridCategories = isOnboarding ? allCategories : usedCategories
+  const mainGrid = gridCategories.slice(0, 8)
+  const overflowUsed = gridCategories.slice(8)
+  const hasOverflow =
+    overflowUsed.length > 0 ||
+    (!isOnboarding && unusedCategories.length > 0)
 
   const totalSavings = plans.reduce(
     (sum, p) => sum + p.amount_per_fortnight,
@@ -311,24 +324,98 @@ export default function TransactionModal({
             <h2 className="text-lg font-bold mb-4">Categoría</h2>
 
             {!showCustomForm && (
-              <div className="grid grid-cols-4 gap-3 mb-4">
-                {categories.map((cat) => (
+              <div className="mb-4">
+                {/* Main grid: top 8 (or all if onboarding) */}
+                <div className="grid grid-cols-4 gap-3">
+                  {mainGrid.map((cat) => (
+                    <button
+                      key={cat.id}
+                      className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
+                      onClick={() => handleCategorySelect(cat.id, cat.label)}
+                    >
+                      <span className="text-2xl">{cat.emoji}</span>
+                      <span className="text-[11px] font-medium">{cat.label}</span>
+                    </button>
+                  ))}
+                  {/* Show + Nueva inline if grid has room (<8) and no overflow */}
+                  {mainGrid.length < 8 && !hasOverflow && (
+                    <button
+                      className="flex flex-col items-center justify-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-dashed border-[var(--border-color)] active:border-positive"
+                      onClick={() => setShowCustomForm(true)}
+                    >
+                      <span className="text-2xl">+</span>
+                      <span className="text-[11px] font-medium">Nueva</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Ver más / Ver menos toggle */}
+                {hasOverflow && (
                   <button
-                    key={cat.id}
-                    className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
-                    onClick={() => handleCategorySelect(cat.id, cat.label)}
+                    className="text-xs font-medium text-positive mt-3 mb-1"
+                    onClick={() => setShowMore(!showMore)}
                   >
-                    <span className="text-2xl">{cat.emoji}</span>
-                    <span className="text-[11px] font-medium">{cat.label}</span>
+                    {showMore ? '− Ver menos' : '+ Ver más'}
                   </button>
-                ))}
-                <button
-                  className="flex flex-col items-center justify-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-dashed border-[var(--border-color)] active:border-positive"
-                  onClick={() => setShowCustomForm(true)}
-                >
-                  <span className="text-2xl">+</span>
-                  <span className="text-[11px] font-medium">Nueva</span>
-                </button>
+                )}
+
+                {/* Expanded section */}
+                {showMore && (
+                  <div
+                    className="overflow-hidden transition-all duration-300"
+                    style={{ maxHeight: showMore ? '600px' : '0' }}
+                  >
+                    {/* Overflow used categories */}
+                    {overflowUsed.length > 0 && (
+                      <div className="grid grid-cols-4 gap-3 mt-2">
+                        {overflowUsed.map((cat) => (
+                          <button
+                            key={cat.id}
+                            className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
+                            onClick={() => handleCategorySelect(cat.id, cat.label)}
+                          >
+                            <span className="text-2xl">{cat.emoji}</span>
+                            <span className="text-[11px] font-medium">{cat.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Unused default categories */}
+                    {!isOnboarding && unusedCategories.length > 0 && (
+                      <>
+                        <p
+                          className="text-[10px] font-medium uppercase mt-4 mb-2"
+                          style={{ letterSpacing: '1px', color: 'var(--text-muted)' }}
+                        >
+                          Nunca usadas
+                        </p>
+                        <div className="grid grid-cols-4 gap-3 opacity-50">
+                          {unusedCategories.map((cat) => (
+                            <button
+                              key={cat.id}
+                              className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
+                              onClick={() => handleCategorySelect(cat.id, cat.label)}
+                            >
+                              <span className="text-2xl">{cat.emoji}</span>
+                              <span className="text-[11px] font-medium">{cat.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {/* + Nueva in expanded view */}
+                    <div className="mt-3">
+                      <button
+                        className="flex items-center gap-2 text-sm text-positive font-medium"
+                        onClick={() => setShowCustomForm(true)}
+                      >
+                        + Nueva categoría
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
