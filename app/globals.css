@@ -1,3 +1,74 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f5;
+    --bg-card: #ffffff;
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --border-color: #e5e7eb;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg-primary: #0a0a0a;
+      --bg-secondary: #171717;
+      --bg-card: #1a1a1a;
+      --text-primary: #f9fafb;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      --border-color: #2e2e2e;
+    }
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-positive text-white font-semibold py-3 px-6 rounded-btn
+      transition-colors hover:bg-green-700 active:bg-green-800
+      disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    @apply rounded-card p-4;
+  }
+
+  .chip {
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    @apply text-xs font-medium px-3 py-1.5 rounded-full;
+  }
+
+  .input-field {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    @apply w-full px-4 py-3 rounded-btn text-sm outline-none
+      focus:ring-2 focus:ring-positive/50 focus:border-positive
+      transition-colors;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
