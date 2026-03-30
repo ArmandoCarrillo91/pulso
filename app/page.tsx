@@ -296,14 +296,6 @@ export default function HomePage() {
     month: 'short',
   })
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-[var(--text-secondary)]">Cargando...</p>
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col min-h-screen p-4" style={{ paddingBottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
       {/* Top Bar */}

@@ -75,10 +75,6 @@ export default function PlanesPage() {
         <h1 className="text-lg font-bold">Mis planes</h1>
       </div>
 
-      {loading && (
-        <p className="text-center text-[var(--text-secondary)] py-8">Cargando...</p>
-      )}
-
       {!loading && plans.length === 0 && (
         <div className="text-center py-12">
           <p className="text-[var(--text-muted)] text-sm mb-4">
