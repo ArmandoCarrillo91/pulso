@@ -58,13 +58,11 @@ export default function TransactionModal({
   const openTimeRef = useRef(0)
   const prevCategoryRef = useRef('')
   const savedIdRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    setCustomCategories(loadCustomCategories())
-  }, [])
+  const emojiInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (isOpen) {
+      setCustomCategories(loadCustomCategories())
       openTimeRef.current = Date.now()
       setStep(1)
       setType('expense')
@@ -108,19 +106,22 @@ export default function TransactionModal({
   }
 
   const handleAddCustomCategory = () => {
-    if (!customEmoji.trim() || !customName.trim()) return
+    if (!customName.trim()) return
+    const emoji = customEmoji.trim() || '📦'
     const newCat: CustomCategory = {
       id: `custom-${Date.now()}`,
       label: customName.trim(),
-      emoji: customEmoji.trim(),
+      emoji,
       type,
     }
-    const updated = [...customCategories, newCat]
-    setCustomCategories(updated)
+    const fresh = loadCustomCategories()
+    const updated = [...fresh, newCat]
     saveCustomCategories(updated)
+    setCustomCategories(updated)
     setShowCustomForm(false)
     setCustomEmoji('')
     setCustomName('')
+    handleCategorySelect(newCat.id, newCat.label)
   }
 
   const handleSave = async () => {
@@ -280,53 +281,72 @@ export default function TransactionModal({
         {step === 2 && (
           <div>
             <h2 className="text-lg font-bold mb-4">Categoría</h2>
-            <div className="grid grid-cols-4 gap-3 mb-4">
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
-                  onClick={() => handleCategorySelect(cat.id, cat.label)}
-                >
-                  <span className="text-2xl">{cat.emoji}</span>
-                  <span className="text-[11px] font-medium">{cat.label}</span>
-                </button>
-              ))}
-              {/* Add custom category button */}
-              <button
-                className="flex flex-col items-center justify-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-dashed border-[var(--border-color)] active:border-positive"
-                onClick={() => setShowCustomForm(true)}
-              >
-                <span className="text-2xl">+</span>
-                <span className="text-[11px] font-medium">Nueva</span>
-              </button>
-            </div>
 
-            {/* Custom category inline form */}
-            {showCustomForm && (
-              <div className="flex items-center gap-2 mb-4">
-                <input
-                  type="text"
-                  value={customEmoji}
-                  onChange={(e) => setCustomEmoji(e.target.value)}
-                  placeholder="😀"
-                  className="input-field w-14 text-center text-xl px-2"
-                  maxLength={4}
-                  autoFocus
-                />
-                <input
-                  type="text"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder="Nombre"
-                  className="input-field flex-1"
-                />
+            {!showCustomForm && (
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                {categories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
+                    onClick={() => handleCategorySelect(cat.id, cat.label)}
+                  >
+                    <span className="text-2xl">{cat.emoji}</span>
+                    <span className="text-[11px] font-medium">{cat.label}</span>
+                  </button>
+                ))}
                 <button
-                  className="bg-positive text-white rounded-btn p-3 font-bold disabled:opacity-50"
-                  disabled={!customEmoji.trim() || !customName.trim()}
+                  className="flex flex-col items-center justify-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-dashed border-[var(--border-color)] active:border-positive"
+                  onClick={() => setShowCustomForm(true)}
+                >
+                  <span className="text-2xl">+</span>
+                  <span className="text-[11px] font-medium">Nueva</span>
+                </button>
+              </div>
+            )}
+
+            {showCustomForm && (
+              <div className="mb-4 space-y-3">
+                <button
+                  className="text-xs text-[var(--text-secondary)] font-medium"
+                  onClick={() => { setShowCustomForm(false); setCustomEmoji(''); setCustomName('') }}
+                >
+                  ← Cancelar
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => emojiInputRef.current?.focus()}
+                    className="flex items-center justify-center shrink-0 w-12 h-12 rounded-btn bg-[var(--bg-secondary)] border border-[var(--border-color)] text-2xl active:border-positive"
+                  >
+                    {customEmoji || '📦'}
+                  </button>
+                  <input
+                    ref={emojiInputRef}
+                    type="text"
+                    value=""
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (val) setCustomEmoji(val)
+                    }}
+                    maxLength={2}
+                    style={{ width: 0, height: 0, opacity: 0, position: 'absolute', pointerEvents: 'none' }}
+                  />
+                  <input
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="Nombre de la categoría"
+                    className="input-field flex-1"
+                    autoFocus
+                  />
+                </div>
+                <Button
+                  fullWidth
+                  disabled={!customName.trim()}
                   onClick={handleAddCustomCategory}
                 >
-                  ✓
-                </button>
+                  Agregar
+                </Button>
               </div>
             )}
 
