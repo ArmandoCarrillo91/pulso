@@ -15,13 +15,17 @@ export function useFixedExpenses() {
     } = await supabase.auth.getUser()
     if (!user) return
 
-    const { data } = await supabase
-      .from('fixed_expenses')
+    const { data, error } = await supabase
+      .from('pulso_fixed_expenses')
       .select('*')
       .eq('user_id', user.id)
       .order('day_of_month', { ascending: true })
 
-    if (data) setExpenses(data)
+    if (error) {
+      console.error('Error fetching fixed expenses:', JSON.stringify(error))
+    } else if (data) {
+      setExpenses(data)
+    }
     setLoading(false)
   }, [supabase])
 
@@ -38,13 +42,13 @@ export function useFixedExpenses() {
     if (!user) return null
 
     const { data, error } = await supabase
-      .from('fixed_expenses')
+      .from('pulso_fixed_expenses')
       .insert({ ...expense, user_id: user.id })
       .select()
       .single()
 
     if (error) {
-      console.error('Error creating expense:', error)
+      console.error('Error creating expense:', JSON.stringify(error))
       return null
     }
     await fetchExpenses()
@@ -56,7 +60,7 @@ export function useFixedExpenses() {
     updates: Partial<FixedExpense>
   ) => {
     const { error } = await supabase
-      .from('fixed_expenses')
+      .from('pulso_fixed_expenses')
       .update(updates)
       .eq('id', id)
     if (!error) await fetchExpenses()
@@ -64,7 +68,7 @@ export function useFixedExpenses() {
 
   const deleteExpense = async (id: string) => {
     const { error } = await supabase
-      .from('fixed_expenses')
+      .from('pulso_fixed_expenses')
       .delete()
       .eq('id', id)
     if (!error) await fetchExpenses()

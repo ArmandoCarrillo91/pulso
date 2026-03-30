@@ -15,14 +15,18 @@ export function useTransactions() {
     } = await supabase.auth.getUser()
     if (!user) return
 
-    const { data } = await supabase
-      .from('transactions')
+    const { data, error } = await supabase
+      .from('pulso_transactions')
       .select('*')
       .eq('user_id', user.id)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
 
-    if (data) setTransactions(data)
+    if (error) {
+      console.error('Error fetching transactions:', JSON.stringify(error))
+    } else if (data) {
+      setTransactions(data)
+    }
     setLoading(false)
   }, [supabase])
 
@@ -33,7 +37,7 @@ export function useTransactions() {
       .channel('transactions-realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'pulso', table: 'transactions' },
+        { event: '*', schema: 'public', table: 'pulso_transactions' },
         () => fetchTransactions()
       )
       .subscribe()
@@ -57,13 +61,13 @@ export function useTransactions() {
     if (!user) return null
 
     const { data, error } = await supabase
-      .from('transactions')
+      .from('pulso_transactions')
       .insert({ ...transaction, user_id: user.id })
       .select()
       .single()
 
     if (error) {
-      console.error('Error creating transaction:', error)
+      console.error('Error creating transaction:', JSON.stringify(error))
       return null
     }
     return data as Transaction

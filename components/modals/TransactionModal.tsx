@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
-import { INCOME_CATEGORIES, EXPENSE_CATEGORIES } from '@/lib/categories'
+import {
+  INCOME_CATEGORIES,
+  EXPENSE_CATEGORIES,
+  loadCustomCategories,
+  saveCustomCategories,
+  type CustomCategory,
+} from '@/lib/categories'
 import Button from '@/components/ui/Button'
 import StarRating from '@/components/ui/StarRating'
 import type { Transaction, Plan } from '@/types'
@@ -40,9 +46,18 @@ export default function TransactionModal({
   const [saving, setSaving] = useState(false)
   const [categoryChanges, setCategoryChanges] = useState(0)
 
+  const [customCategories, setCustomCategories] = useState<CustomCategory[]>([])
+  const [showCustomForm, setShowCustomForm] = useState(false)
+  const [customEmoji, setCustomEmoji] = useState('')
+  const [customName, setCustomName] = useState('')
+
   const openTimeRef = useRef(0)
   const prevCategoryRef = useRef('')
   const savedIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    setCustomCategories(loadCustomCategories())
+  }, [])
 
   useEffect(() => {
     if (isOpen) {
@@ -58,6 +73,9 @@ export default function TransactionModal({
       setCategoryChanges(0)
       prevCategoryRef.current = ''
       savedIdRef.current = null
+      setShowCustomForm(false)
+      setCustomEmoji('')
+      setCustomName('')
     }
   }, [isOpen])
 
@@ -68,6 +86,23 @@ export default function TransactionModal({
     prevCategoryRef.current = id
     setCategoryId(id)
     setCategoryLabel(label)
+    setStep(3)
+  }
+
+  const handleAddCustomCategory = () => {
+    if (!customEmoji.trim() || !customName.trim()) return
+    const newCat: CustomCategory = {
+      id: `custom-${Date.now()}`,
+      label: customName.trim(),
+      emoji: customEmoji.trim(),
+      type,
+    }
+    const updated = [...customCategories, newCat]
+    setCustomCategories(updated)
+    saveCustomCategories(updated)
+    setShowCustomForm(false)
+    setCustomEmoji('')
+    setCustomName('')
   }
 
   const handleSave = async () => {
@@ -136,23 +171,30 @@ export default function TransactionModal({
   const handleRatingDone = async () => {
     if (savedIdRef.current && rating > 0) {
       const supabase = createClient()
-      await supabase
-        .from('transactions')
+      const { error } = await supabase
+        .from('pulso_transactions')
         .update({ rating })
         .eq('id', savedIdRef.current)
+      if (error) {
+        console.error('Error updating rating:', JSON.stringify(error))
+      }
     }
     onClose()
   }
 
   if (!isOpen) return null
 
-  const categories =
+  const defaultCategories =
     type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
+  const customForType = customCategories.filter((c) => c.type === type)
+  const categories = [...defaultCategories, ...customForType]
+
   const totalSavings = plans.reduce(
     (sum, p) => sum + p.amount_per_fortnight,
     0
   )
-  const showSavingsNote = categoryId === 'quincena' && plans.length > 0
+  const showSavingsNote =
+    categoryId === 'quincena' && plans.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
@@ -207,7 +249,7 @@ export default function TransactionModal({
           </div>
         )}
 
-        {/* Step 2: Category */}
+        {/* Step 2: Category — auto-advances on tap */}
         {step === 2 && (
           <div>
             <h2 className="text-lg font-bold mb-4">Categoría</h2>
@@ -215,36 +257,55 @@ export default function TransactionModal({
               {categories.map((cat) => (
                 <button
                   key={cat.id}
-                  className={`flex flex-col items-center gap-1 p-3 rounded-card transition-all ${
-                    categoryId === cat.id
-                      ? 'bg-positive/10 border-2 border-positive'
-                      : 'bg-[var(--bg-secondary)] border-2 border-transparent'
-                  }`}
+                  className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
                   onClick={() => handleCategorySelect(cat.id, cat.label)}
                 >
                   <span className="text-2xl">{cat.emoji}</span>
                   <span className="text-[11px] font-medium">{cat.label}</span>
                 </button>
               ))}
-            </div>
-            {showSavingsNote && (
-              <p className="text-sm text-positive bg-positive/10 p-3 rounded-btn mb-4">
-                Se apartarán ${totalSavings.toLocaleString()} para tus{' '}
-                {plans.length} planes de ahorro
-              </p>
-            )}
-            <div className="flex gap-3">
-              <Button variant="secondary" onClick={() => setStep(1)}>
-                Atrás
-              </Button>
-              <Button
-                fullWidth
-                disabled={!categoryId}
-                onClick={() => setStep(3)}
+              {/* Add custom category button */}
+              <button
+                className="flex flex-col items-center justify-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-dashed border-[var(--border-color)] active:border-positive"
+                onClick={() => setShowCustomForm(true)}
               >
-                Siguiente
-              </Button>
+                <span className="text-2xl">+</span>
+                <span className="text-[11px] font-medium">Nueva</span>
+              </button>
             </div>
+
+            {/* Custom category inline form */}
+            {showCustomForm && (
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="text"
+                  value={customEmoji}
+                  onChange={(e) => setCustomEmoji(e.target.value)}
+                  placeholder="😀"
+                  className="input-field w-14 text-center text-xl px-2"
+                  maxLength={4}
+                  autoFocus
+                />
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Nombre"
+                  className="input-field flex-1"
+                />
+                <button
+                  className="bg-positive text-white rounded-btn p-3 font-bold disabled:opacity-50"
+                  disabled={!customEmoji.trim() || !customName.trim()}
+                  onClick={handleAddCustomCategory}
+                >
+                  ✓
+                </button>
+              </div>
+            )}
+
+            <Button variant="secondary" onClick={() => setStep(1)}>
+              Atrás
+            </Button>
           </div>
         )}
 
@@ -252,6 +313,12 @@ export default function TransactionModal({
         {step === 3 && (
           <div>
             <h2 className="text-lg font-bold mb-4">Monto</h2>
+            {showSavingsNote && (
+              <p className="text-sm text-positive bg-positive/10 p-3 rounded-btn mb-4">
+                Se apartarán ${totalSavings.toLocaleString()} para tus{' '}
+                {plans.length} planes de ahorro
+              </p>
+            )}
             <div className="flex items-center justify-center mb-4">
               <span className="text-4xl font-bold mr-1">$</span>
               <input

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
-import { ALL_CATEGORIES } from '@/lib/categories'
+import { getCategoryEmoji } from '@/lib/categories'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePlans } from '@/hooks/usePlans'
 import { usePayday } from '@/hooks/usePayday'
@@ -141,7 +141,6 @@ export default function HomePage() {
           )}
           {transactions.map((t, i) => {
             const opacity = Math.max(1 - i * 0.12, 0.3)
-            const cat = ALL_CATEGORIES.find((c) => c.id === t.category_id)
             return (
               <div
                 key={t.id}
@@ -149,7 +148,7 @@ export default function HomePage() {
                 style={{ opacity }}
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-xl">{cat?.emoji || '📄'}</span>
+                  <span className="text-xl">{getCategoryEmoji(t.category_id)}</span>
                   <div>
                     <p className="text-sm font-medium">{t.category_label}</p>
                     {t.note && (

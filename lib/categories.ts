@@ -17,3 +17,37 @@ export const EXPENSE_CATEGORIES = [
 ]
 
 export const ALL_CATEGORIES = [...INCOME_CATEGORIES, ...EXPENSE_CATEGORIES]
+
+export interface Category {
+  id: string
+  label: string
+  emoji: string
+}
+
+export interface CustomCategory extends Category {
+  type: 'income' | 'expense'
+}
+
+const STORAGE_KEY = 'pulso_custom_categories'
+
+export function loadCustomCategories(): CustomCategory[] {
+  if (typeof window === 'undefined') return []
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+export function saveCustomCategories(categories: CustomCategory[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(categories))
+}
+
+export function getCategoryEmoji(categoryId: string): string {
+  const found = ALL_CATEGORIES.find((c) => c.id === categoryId)
+  if (found) return found.emoji
+
+  const custom = loadCustomCategories()
+  const customFound = custom.find((c) => c.id === categoryId)
+  return customFound?.emoji || '📄'
+}
