@@ -4,29 +4,22 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getLocalDateString } from '@/lib/date'
 import { detectPlatform } from '@/lib/utils'
-import {
-  INCOME_CATEGORIES,
-  EXPENSE_CATEGORIES,
-  loadCustomCategories,
-  saveCustomCategories,
-  type CustomCategory,
-} from '@/lib/categories'
+import { useCategories } from '@/hooks/useCategories'
 import Button from '@/components/ui/Button'
 import StarRating from '@/components/ui/StarRating'
-import type { Transaction, Plan } from '@/types'
+import type { Transaction, Plan, Category } from '@/types'
 
 interface TransactionModalProps {
   isOpen: boolean
   onClose: () => void
   onSave: (
-    transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id'>
+    transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'>
   ) => Promise<Transaction | null>
   onCreateFixedExpense?: (expense: {
     name: string
     amount: number
     day_of_month: number
     category_id: string | null
-    category_label: string | null
     next_payment_date: string | null
     end_date: string | null
   }) => Promise<unknown>
@@ -50,8 +43,7 @@ export default function TransactionModal({
 }: TransactionModalProps) {
   const [step, setStep] = useState(1)
   const [type, setType] = useState<'income' | 'expense'>('expense')
-  const [categoryId, setCategoryId] = useState('')
-  const [categoryLabel, setCategoryLabel] = useState('')
+  const [categoryId, setCategoryId] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [rating, setRating] = useState(0)
@@ -63,31 +55,34 @@ export default function TransactionModal({
 
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
 
-  const [customCategories, setCustomCategories] = useState<CustomCategory[]>([])
   const [showCustomForm, setShowCustomForm] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [customEmoji, setCustomEmoji] = useState('')
   const [customName, setCustomName] = useState('')
 
   const openTimeRef = useRef(0)
-  const prevCategoryRef = useRef('')
+  const prevCategoryRef = useRef<string | null>(null)
   const savedIdRef = useRef<string | null>(null)
   const emojiInputRef = useRef<HTMLInputElement>(null)
 
+  const {
+    incomeCategories,
+    expenseCategories,
+    createCategory,
+  } = useCategories()
+
   useEffect(() => {
     if (isOpen) {
-      setCustomCategories(loadCustomCategories())
       openTimeRef.current = Date.now()
       setStep(1)
       setType('expense')
-      setCategoryId('')
-      setCategoryLabel('')
+      setCategoryId(null)
       setAmount('')
       setNote('')
       setRating(0)
       setSaving(false)
       setCategoryChanges(0)
-      prevCategoryRef.current = ''
+      prevCategoryRef.current = null
       savedIdRef.current = null
       setDate(getLocalDateString())
       setIsRecurring(false)
@@ -105,40 +100,39 @@ export default function TransactionModal({
           if (!data) return
           const counts: Record<string, number> = {}
           for (const row of data) {
-            counts[row.category_id] = (counts[row.category_id] || 0) + 1
+            if (row.category_id) {
+              counts[row.category_id] = (counts[row.category_id] || 0) + 1
+            }
           }
           setCategoryCounts(counts)
         })
     }
   }, [isOpen])
 
-  const handleCategorySelect = (id: string, label: string) => {
-    if (prevCategoryRef.current && prevCategoryRef.current !== id) {
+  const handleCategorySelect = (cat: Category) => {
+    if (prevCategoryRef.current && prevCategoryRef.current !== cat.id) {
       setCategoryChanges((c) => c + 1)
     }
-    prevCategoryRef.current = id
-    setCategoryId(id)
-    setCategoryLabel(label)
+    prevCategoryRef.current = cat.id
+    setCategoryId(cat.id)
     setStep(3)
   }
 
-  const handleAddCustomCategory = () => {
+  const handleAddCustomCategory = async () => {
     if (!customName.trim()) return
     const emoji = customEmoji.trim() || '📦'
-    const newCat: CustomCategory = {
-      id: `custom-${Date.now()}`,
+    const newCat = await createCategory({
       label: customName.trim(),
       emoji,
       type,
+      parent_id: null,
+    })
+    if (newCat) {
+      setShowCustomForm(false)
+      setCustomEmoji('')
+      setCustomName('')
+      handleCategorySelect(newCat)
     }
-    const fresh = loadCustomCategories()
-    const updated = [...fresh, newCat]
-    saveCustomCategories(updated)
-    setCustomCategories(updated)
-    setShowCustomForm(false)
-    setCustomEmoji('')
-    setCustomName('')
-    handleCategorySelect(newCat.id, newCat.label)
   }
 
   const handleSave = async () => {
@@ -172,10 +166,9 @@ export default function TransactionModal({
     const selectedDate = date || getLocalDateString(now)
     const dateObj = new Date(selectedDate + 'T12:00:00')
 
-    const transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id'> = {
+    const transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'> = {
       type,
       category_id: categoryId,
-      category_label: categoryLabel,
       amount: parsed,
       note: note.trim() || null,
       rating: null,
@@ -203,12 +196,12 @@ export default function TransactionModal({
 
     if (result && isRecurring && onCreateFixedExpense) {
       const day = parseInt(recurringDay) || new Date().getDate()
+      const selectedCat = allCategories.find((c) => c.id === categoryId)
       await onCreateFixedExpense({
-        name: categoryLabel,
+        name: selectedCat?.label || 'Gasto fijo',
         amount: parsed,
         day_of_month: day,
         category_id: categoryId,
-        category_label: categoryLabel,
         next_payment_date: null,
         end_date: null,
       })
@@ -238,10 +231,8 @@ export default function TransactionModal({
 
   if (!isOpen) return null
 
-  const defaultCategories =
-    type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
-  const customForType = customCategories.filter((c) => c.type === type)
-  const allCategories = [...defaultCategories, ...customForType]
+  const allCategories = type === 'income' ? incomeCategories : expenseCategories
+  const hasNoCategories = allCategories.length === 0
 
   const hasAnyTransactions = Object.values(categoryCounts).some((c) => c > 0)
   const usedCategories = allCategories
@@ -249,7 +240,6 @@ export default function TransactionModal({
     .sort((a, b) => (categoryCounts[b.id] || 0) - (categoryCounts[a.id] || 0))
   const unusedCategories = allCategories.filter((c) => !categoryCounts[c.id])
 
-  // Onboarding: show all defaults. Otherwise: only used.
   const isOnboarding = !hasAnyTransactions
   const gridCategories = isOnboarding ? allCategories : usedCategories
   const mainGrid = gridCategories.slice(0, 8)
@@ -262,8 +252,9 @@ export default function TransactionModal({
     (sum, p) => sum + p.amount_per_fortnight,
     0
   )
+  const selectedCat = allCategories.find((c) => c.id === categoryId)
   const showSavingsNote =
-    categoryId === 'quincena' && plans.length > 0
+    selectedCat?.slug?.startsWith('quincena') && plans.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
@@ -323,7 +314,19 @@ export default function TransactionModal({
           <div>
             <h2 className="text-lg font-bold mb-4">Categoría</h2>
 
-            {!showCustomForm && (
+            {/* No categories: show create form directly */}
+            {hasNoCategories && !showCustomForm && (
+              <div className="text-center mb-4">
+                <p className="text-sm text-[var(--text-muted)] mb-4">
+                  Aún no tienes categorías. Crea tu primera.
+                </p>
+                <Button onClick={() => setShowCustomForm(true)}>
+                  + Nueva categoría
+                </Button>
+              </div>
+            )}
+
+            {!hasNoCategories && !showCustomForm && (
               <div className="mb-4">
                 {/* Main grid: top 8 (or all if onboarding) */}
                 <div className="grid grid-cols-4 gap-3">
@@ -331,7 +334,7 @@ export default function TransactionModal({
                     <button
                       key={cat.id}
                       className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
-                      onClick={() => handleCategorySelect(cat.id, cat.label)}
+                      onClick={() => handleCategorySelect(cat)}
                     >
                       <span className="text-2xl">{cat.emoji}</span>
                       <span className="text-[11px] font-medium">{cat.label}</span>
@@ -372,7 +375,7 @@ export default function TransactionModal({
                           <button
                             key={cat.id}
                             className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
-                            onClick={() => handleCategorySelect(cat.id, cat.label)}
+                            onClick={() => handleCategorySelect(cat)}
                           >
                             <span className="text-2xl">{cat.emoji}</span>
                             <span className="text-[11px] font-medium">{cat.label}</span>
@@ -381,7 +384,7 @@ export default function TransactionModal({
                       </div>
                     )}
 
-                    {/* Unused default categories */}
+                    {/* Unused categories */}
                     {!isOnboarding && unusedCategories.length > 0 && (
                       <>
                         <p
@@ -395,7 +398,7 @@ export default function TransactionModal({
                             <button
                               key={cat.id}
                               className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
-                              onClick={() => handleCategorySelect(cat.id, cat.label)}
+                              onClick={() => handleCategorySelect(cat)}
                             >
                               <span className="text-2xl">{cat.emoji}</span>
                               <span className="text-[11px] font-medium">{cat.label}</span>
@@ -421,12 +424,14 @@ export default function TransactionModal({
 
             {showCustomForm && (
               <div className="mb-4 space-y-3">
-                <button
-                  className="text-xs text-[var(--text-secondary)] font-medium"
-                  onClick={() => { setShowCustomForm(false); setCustomEmoji(''); setCustomName('') }}
-                >
-                  ← Cancelar
-                </button>
+                {!hasNoCategories && (
+                  <button
+                    className="text-xs text-[var(--text-secondary)] font-medium"
+                    onClick={() => { setShowCustomForm(false); setCustomEmoji(''); setCustomName('') }}
+                  >
+                    ← Cancelar
+                  </button>
+                )}
                 <div className="flex items-center gap-2">
                   <button
                     type="button"

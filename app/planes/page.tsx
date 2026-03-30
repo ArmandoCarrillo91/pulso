@@ -10,6 +10,7 @@ import SwipeableRow from '@/components/ui/SwipeableRow'
 import Toast from '@/components/ui/Toast'
 import ProgressBar from '@/components/ui/ProgressBar'
 import Button from '@/components/ui/Button'
+import { PlanListSkeleton } from '@/components/ui/Skeleton'
 import type { Plan, PlanType } from '@/types'
 
 const TYPE_BADGE: Record<PlanType, { label: string; emoji: string; cls: string }> = {
@@ -74,6 +75,8 @@ export default function PlanesPage() {
       <div className="mb-6">
         <h1 className="text-lg font-bold">Mis planes</h1>
       </div>
+
+      {loading && <PlanListSkeleton />}
 
       {!loading && plans.length === 0 && (
         <div className="text-center py-12">

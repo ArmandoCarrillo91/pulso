@@ -2,50 +2,52 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase'
-import {
-  EXPENSE_CATEGORIES,
-  INCOME_CATEGORIES,
-  loadCustomCategories,
-  saveCustomCategories,
-  loadHiddenDefaults,
-  saveHiddenDefaults,
-  loadOverrides,
-  saveOverrides,
-  type CustomCategory,
-} from '@/lib/categories'
+import { useCategories } from '@/hooks/useCategories'
 import SwipeableRow from '@/components/ui/SwipeableRow'
+import type { Category } from '@/types'
 
 export default function CategoriesPage() {
-  const supabase = createClient()
+  const {
+    categories,
+    incomeCategories,
+    expenseCategories,
+    createCategory,
+    updateCategory,
+    deleteCategory,
+  } = useCategories()
 
   const [catTab, setCatTab] = useState<'expense' | 'income'>('expense')
-  const [customCats, setCustomCats] = useState(() => loadCustomCategories())
-  const [hiddenDefaults, setHiddenDefaults] = useState(() => loadHiddenDefaults())
-  const [overrides, setOverrides] = useState(() => loadOverrides())
   const [editingCatId, setEditingCatId] = useState<string | null>(null)
   const [editCatEmoji, setEditCatEmoji] = useState('')
   const [editCatName, setEditCatName] = useState('')
 
-  // Add new custom category
   const [showNewForm, setShowNewForm] = useState(false)
   const [newEmoji, setNewEmoji] = useState('')
   const [newName, setNewName] = useState('')
+  const [newParentId, setNewParentId] = useState<string | null>(null)
 
-  const defaults = catTab === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES
-  const visibleDefaults = defaults
-    .filter((c) => !hiddenDefaults.includes(c.id))
-    .map((c) => {
-      const ov = overrides.find((o) => o.id === c.id)
-      return ov ? { ...c, emoji: ov.emoji, label: ov.label } : c
+  // Expanded parents (to show subcategories)
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set())
+
+  const topLevel = catTab === 'expense' ? expenseCategories : incomeCategories
+
+  // Get subcategories for a parent
+  const getSubcategories = (parentId: string) =>
+    categories.filter((c) => c.parent_id === parentId)
+
+  const hasSubcategories = (parentId: string) =>
+    categories.some((c) => c.parent_id === parentId)
+
+  const toggleExpand = (id: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
     })
-  const customForTab = customCats.filter((c) => c.type === catTab)
-  const allCats = [...visibleDefaults, ...customForTab]
+  }
 
-  const isDefaultId = (id: string) =>
-    [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].some((c) => c.id === id)
-
-  const startEdit = (cat: { id: string; emoji: string; label: string }) => {
+  const startEdit = (cat: Category) => {
     setEditingCatId(cat.id)
     setEditCatEmoji(cat.emoji)
     setEditCatName(cat.label)
@@ -53,62 +55,113 @@ export default function CategoriesPage() {
 
   const saveEdit = async () => {
     if (!editingCatId || !editCatName.trim()) return
-    const newLabel = editCatName.trim()
-    const emoji = editCatEmoji.trim() || '📦'
-
-    if (isDefaultId(editingCatId)) {
-      const updated = [
-        ...overrides.filter((o) => o.id !== editingCatId),
-        { id: editingCatId, emoji, label: newLabel },
-      ]
-      saveOverrides(updated)
-      setOverrides(updated)
-    } else {
-      const updated = customCats.map((c) =>
-        c.id === editingCatId ? { ...c, label: newLabel, emoji } : c
-      )
-      saveCustomCategories(updated)
-      setCustomCats(updated)
-    }
-
-    await supabase
-      .from('transactions')
-      .update({ category_label: newLabel })
-      .eq('category_id', editingCatId)
-
+    await updateCategory(editingCatId, {
+      label: editCatName.trim(),
+      emoji: editCatEmoji.trim() || '📦',
+    })
     setEditingCatId(null)
   }
 
-  const deleteCat = (id: string) => {
-    if (isDefaultId(id)) {
-      const updated = [...hiddenDefaults, id]
-      saveHiddenDefaults(updated)
-      setHiddenDefaults(updated)
-      const ov = overrides.filter((o) => o.id !== id)
-      saveOverrides(ov)
-      setOverrides(ov)
-    } else {
-      const updated = customCats.filter((c) => c.id !== id)
-      saveCustomCategories(updated)
-      setCustomCats(updated)
-    }
-  }
-
-  const handleAddNew = () => {
+  const handleAddNew = async () => {
     if (!newName.trim()) return
-    const cat: CustomCategory = {
-      id: `custom-${Date.now()}`,
+    await createCategory({
       emoji: newEmoji.trim() || '📦',
       label: newName.trim(),
       type: catTab,
-    }
-    const fresh = loadCustomCategories()
-    const updated = [...fresh, cat]
-    saveCustomCategories(updated)
-    setCustomCats(updated)
+      parent_id: newParentId,
+    })
     setShowNewForm(false)
     setNewEmoji('')
     setNewName('')
+    setNewParentId(null)
+  }
+
+  const startAddSubcategory = (parentId: string) => {
+    setNewParentId(parentId)
+    setShowNewForm(true)
+    setNewEmoji('')
+    setNewName('')
+    // Expand parent to show subcategories
+    setExpandedParents((prev) => new Set(prev).add(parentId))
+  }
+
+  const renderCategoryRow = (cat: Category, indented = false) => {
+    if (editingCatId === cat.id) {
+      return (
+        <div
+          key={cat.id}
+          className={`flex items-center gap-2 p-3 rounded-card bg-[var(--bg-card)] ${indented ? 'ml-6' : ''}`}
+          style={{ border: '0.5px solid var(--pill-border)' }}
+        >
+          <input
+            type="text"
+            value={editCatEmoji}
+            onChange={(e) => setEditCatEmoji(e.target.value)}
+            className="input-field w-12 text-center text-lg px-1 py-1"
+          />
+          <input
+            type="text"
+            value={editCatName}
+            onChange={(e) => setEditCatName(e.target.value)}
+            className="input-field flex-1 py-1"
+            autoFocus
+          />
+          <button className="text-positive font-semibold text-xs px-2" onClick={saveEdit}>
+            ✓
+          </button>
+          <button className="text-[var(--text-muted)] text-xs px-2" onClick={() => setEditingCatId(null)}>
+            ✕
+          </button>
+        </div>
+      )
+    }
+
+    const hasSubs = hasSubcategories(cat.id)
+    const isExpanded = expandedParents.has(cat.id)
+
+    return (
+      <div key={cat.id}>
+        <SwipeableRow
+          onEdit={() => startEdit(cat)}
+          onDelete={() => deleteCategory(cat.id)}
+        >
+          <div
+            className={`flex items-center gap-3 p-3 rounded-card bg-[var(--bg-card)] ${indented ? 'ml-6' : ''}`}
+            style={{ border: '0.5px solid var(--pill-border)' }}
+          >
+            <span className="text-lg">{cat.emoji}</span>
+            <p className="text-sm font-medium flex-1">{cat.label}</p>
+            {!indented && (
+              <button
+                className="text-[var(--text-muted)] p-1"
+                onClick={(e) => { e.stopPropagation(); toggleExpand(cat.id) }}
+              >
+                <svg
+                  width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </SwipeableRow>
+
+        {/* Subcategories */}
+        {!indented && isExpanded && (
+          <div className="space-y-1.5 mt-1.5">
+            {getSubcategories(cat.id).map((sub) => renderCategoryRow(sub, true))}
+            <button
+              className="ml-6 flex items-center gap-2 text-xs text-positive font-medium py-2"
+              onClick={() => startAddSubcategory(cat.id)}
+            >
+              + Subcategoría
+            </button>
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -125,7 +178,7 @@ export default function CategoriesPage() {
           <h1 className="text-lg font-bold">Categorías</h1>
         </div>
         {!showNewForm && (
-          <button className="text-sm text-positive font-semibold" onClick={() => setShowNewForm(true)}>
+          <button className="text-sm text-positive font-semibold" onClick={() => { setShowNewForm(true); setNewParentId(null) }}>
             + Nueva
           </button>
         )}
@@ -169,7 +222,7 @@ export default function CategoriesPage() {
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="Nombre"
+            placeholder={newParentId ? 'Subcategoría' : 'Nombre'}
             className="input-field flex-1 py-1"
             autoFocus
           />
@@ -182,7 +235,7 @@ export default function CategoriesPage() {
           </button>
           <button
             className="text-[var(--text-muted)] text-xs px-2"
-            onClick={() => { setShowNewForm(false); setNewEmoji(''); setNewName('') }}
+            onClick={() => { setShowNewForm(false); setNewEmoji(''); setNewName(''); setNewParentId(null) }}
           >
             ✕
           </button>
@@ -191,48 +244,19 @@ export default function CategoriesPage() {
 
       {/* Category list */}
       <div className="space-y-1.5">
-        {allCats.map((cat) =>
-          editingCatId === cat.id ? (
-            <div
-              key={cat.id}
-              className="flex items-center gap-2 p-3 rounded-card bg-[var(--bg-card)]"
-              style={{ border: '0.5px solid var(--pill-border)' }}
+        {topLevel.map((cat) => renderCategoryRow(cat))}
+        {topLevel.length === 0 && !showNewForm && (
+          <div className="text-center py-12">
+            <p className="text-[var(--text-muted)] text-sm mb-4">
+              Sin categorías de {catTab === 'expense' ? 'gasto' : 'ingreso'}
+            </p>
+            <button
+              className="text-sm text-positive font-semibold"
+              onClick={() => { setShowNewForm(true); setNewParentId(null) }}
             >
-              <input
-                type="text"
-                value={editCatEmoji}
-                onChange={(e) => setEditCatEmoji(e.target.value)}
-                className="input-field w-12 text-center text-lg px-1 py-1"
-              />
-              <input
-                type="text"
-                value={editCatName}
-                onChange={(e) => setEditCatName(e.target.value)}
-                className="input-field flex-1 py-1"
-                autoFocus
-              />
-              <button className="text-positive font-semibold text-xs px-2" onClick={saveEdit}>
-                ✓
-              </button>
-              <button className="text-[var(--text-muted)] text-xs px-2" onClick={() => setEditingCatId(null)}>
-                ✕
-              </button>
-            </div>
-          ) : (
-            <SwipeableRow
-              key={cat.id}
-              onEdit={() => startEdit(cat)}
-              onDelete={() => deleteCat(cat.id)}
-            >
-              <div
-                className="flex items-center gap-3 p-3 rounded-card bg-[var(--bg-card)]"
-                style={{ border: '0.5px solid var(--pill-border)' }}
-              >
-                <span className="text-lg">{cat.emoji}</span>
-                <p className="text-sm font-medium flex-1">{cat.label}</p>
-              </div>
-            </SwipeableRow>
-          )
+              + Crear primera categoría
+            </button>
+          </div>
         )}
       </div>
     </div>

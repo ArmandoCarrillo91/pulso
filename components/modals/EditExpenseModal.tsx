@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { EXPENSE_CATEGORIES } from '@/lib/categories'
+import { useCategories } from '@/hooks/useCategories'
 import { getLocalDateString } from '@/lib/date'
 import Button from '@/components/ui/Button'
 import type { FixedExpense } from '@/types'
@@ -31,16 +31,16 @@ export default function EditExpenseModal({
   const [nextPaymentDate, setNextPaymentDate] = useState('')
   const [endDateOption, setEndDateOption] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
-  const [categoryId, setCategoryId] = useState('')
-  const [categoryLabel, setCategoryLabel] = useState('')
+  const [categoryId, setCategoryId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const { expenseCategories } = useCategories()
 
   useEffect(() => {
     if (expense) {
       setName(expense.name)
       setAmount(String(expense.amount))
-      setCategoryId(expense.category_id || '')
-      setCategoryLabel(expense.category_label || '')
+      setCategoryId(expense.category_id)
 
       if (expense.next_payment_date) {
         setNextPaymentDate(expense.next_payment_date)
@@ -85,8 +85,7 @@ export default function EditExpenseModal({
       name: name.trim(),
       amount: amt,
       day_of_month: payDate.getDate(),
-      category_id: categoryId || null,
-      category_label: categoryLabel || null,
+      category_id: categoryId,
       next_payment_date: nextPaymentDate || null,
       end_date: resolveEndDate(),
     })
@@ -128,23 +127,27 @@ export default function EditExpenseModal({
           <input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)} className="input-field mb-3" />
         )}
 
-        <label className="block text-xs text-[var(--text-secondary)] mb-2">Categoría</label>
-        <div className="grid grid-cols-4 gap-2 mb-6">
-          {EXPENSE_CATEGORIES.map((cat) => (
-            <button
-              key={cat.id}
-              className={`flex flex-col items-center gap-1 p-2 rounded-card transition-all ${
-                categoryId === cat.id
-                  ? 'bg-positive/10 border-2 border-positive'
-                  : 'bg-[var(--bg-secondary)] border-2 border-transparent'
-              }`}
-              onClick={() => { setCategoryId(cat.id); setCategoryLabel(cat.label) }}
-            >
-              <span className="text-lg">{cat.emoji}</span>
-              <span className="text-[10px] font-medium">{cat.label}</span>
-            </button>
-          ))}
-        </div>
+        {expenseCategories.length > 0 && (
+          <>
+            <label className="block text-xs text-[var(--text-secondary)] mb-2">Categoría</label>
+            <div className="grid grid-cols-4 gap-2 mb-6">
+              {expenseCategories.map((cat) => (
+                <button
+                  key={cat.id}
+                  className={`flex flex-col items-center gap-1 p-2 rounded-card transition-all ${
+                    categoryId === cat.id
+                      ? 'bg-positive/10 border-2 border-positive'
+                      : 'bg-[var(--bg-secondary)] border-2 border-transparent'
+                  }`}
+                  onClick={() => setCategoryId(cat.id)}
+                >
+                  <span className="text-lg">{cat.emoji}</span>
+                  <span className="text-[10px] font-medium">{cat.label}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="flex gap-3">
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>

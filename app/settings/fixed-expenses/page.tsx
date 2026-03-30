@@ -2,9 +2,9 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { EXPENSE_CATEGORIES, getCategoryEmoji } from '@/lib/categories'
 import { getLocalDateString } from '@/lib/date'
 import { useFixedExpenses } from '@/hooks/useFixedExpenses'
+import { useCategories } from '@/hooks/useCategories'
 import EditExpenseModal from '@/components/modals/EditExpenseModal'
 import SwipeableRow from '@/components/ui/SwipeableRow'
 import Button from '@/components/ui/Button'
@@ -22,6 +22,7 @@ const END_DATE_OPTIONS = [
 export default function FixedExpensesPage() {
   const { expenses, createExpense, updateExpense, deleteExpense } =
     useFixedExpenses()
+  const { expenseCategories } = useCategories()
 
   const [editingExpense, setEditingExpense] = useState<FixedExpense | null>(null)
   const [showAdd, setShowAdd] = useState(false)
@@ -34,8 +35,7 @@ export default function FixedExpensesPage() {
   })
   const [newEndOption, setNewEndOption] = useState('')
   const [newCustomEnd, setNewCustomEnd] = useState('')
-  const [newCatId, setNewCatId] = useState('')
-  const [newCatLabel, setNewCatLabel] = useState('')
+  const [newCatId, setNewCatId] = useState<string | null>(null)
 
   const resolveEndDate = (): string | null => {
     if (!newEndOption) return null
@@ -63,16 +63,14 @@ export default function FixedExpensesPage() {
       name: newName.trim(),
       amount: amt,
       day_of_month: payDate.getDate(),
-      category_id: newCatId || null,
-      category_label: newCatLabel || null,
+      category_id: newCatId,
       next_payment_date: newNextDate || null,
       end_date: resolveEndDate(),
     })
     setShowAdd(false)
     setNewName('')
     setNewAmount('')
-    setNewCatId('')
-    setNewCatLabel('')
+    setNewCatId(null)
   }
 
   return (
@@ -114,24 +112,28 @@ export default function FixedExpensesPage() {
             <input type="date" value={newCustomEnd} onChange={(e) => setNewCustomEnd(e.target.value)} className="input-field" />
           )}
 
-          <label className="block text-xs text-[var(--text-secondary)]">Categoría</label>
-          <div className="grid grid-cols-4 gap-2">
-            {EXPENSE_CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                className={`flex flex-col items-center gap-1 p-2 rounded-card transition-all ${
-                  newCatId === cat.id
-                    ? 'bg-positive/10 border-2 border-positive'
-                    : 'bg-[var(--bg-secondary)] border-2 border-transparent'
-                }`}
-                onClick={() => { setNewCatId(cat.id); setNewCatLabel(cat.label) }}
-              >
-                <span className="text-lg">{cat.emoji}</span>
-                <span className="text-[10px] font-medium">{cat.label}</span>
-              </button>
-            ))}
-          </div>
+          {expenseCategories.length > 0 && (
+            <>
+              <label className="block text-xs text-[var(--text-secondary)]">Categoría</label>
+              <div className="grid grid-cols-4 gap-2">
+                {expenseCategories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    className={`flex flex-col items-center gap-1 p-2 rounded-card transition-all ${
+                      newCatId === cat.id
+                        ? 'bg-positive/10 border-2 border-positive'
+                        : 'bg-[var(--bg-secondary)] border-2 border-transparent'
+                    }`}
+                    onClick={() => setNewCatId(cat.id)}
+                  >
+                    <span className="text-lg">{cat.emoji}</span>
+                    <span className="text-[10px] font-medium">{cat.label}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           <div className="flex gap-3">
             <Button variant="secondary" type="button" onClick={() => setShowAdd(false)}>Cancelar</Button>
@@ -149,8 +151,8 @@ export default function FixedExpensesPage() {
             onDelete={() => deleteExpense(expense.id)}
           >
             <div className="flex items-center gap-3 p-4 rounded-card bg-[var(--bg-card)]" style={{ border: '0.5px solid var(--pill-border)' }}>
-              {expense.category_id && (
-                <span className="text-lg">{getCategoryEmoji(expense.category_id)}</span>
+              {expense.category?.emoji && (
+                <span className="text-lg">{expense.category.emoji}</span>
               )}
               <div className="flex-1">
                 <p className="text-sm font-semibold">{expense.name}</p>

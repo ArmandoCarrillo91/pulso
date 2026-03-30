@@ -1,11 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import {
-  INCOME_CATEGORIES,
-  EXPENSE_CATEGORIES,
-  loadCustomCategories,
-} from '@/lib/categories'
+import { useCategories } from '@/hooks/useCategories'
 import { getLocalDateString } from '@/lib/date'
 import Button from '@/components/ui/Button'
 import type { Transaction } from '@/types'
@@ -24,19 +20,19 @@ export default function EditTransactionModal({
   onDelete,
 }: EditTransactionModalProps) {
   const [type, setType] = useState<'income' | 'expense'>('expense')
-  const [categoryId, setCategoryId] = useState('')
-  const [categoryLabel, setCategoryLabel] = useState('')
+  const [categoryId, setCategoryId] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [date, setDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const { incomeCategories, expenseCategories } = useCategories()
+
   useEffect(() => {
     if (transaction) {
       setType(transaction.type)
       setCategoryId(transaction.category_id)
-      setCategoryLabel(transaction.category_label)
       setAmount(String(transaction.amount))
       setNote(transaction.note || '')
       setDate(transaction.date)
@@ -46,12 +42,7 @@ export default function EditTransactionModal({
 
   if (!transaction) return null
 
-  const customCategories = loadCustomCategories().filter(
-    (c) => c.type === type
-  )
-  const defaultCategories =
-    type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
-  const categories = [...defaultCategories, ...customCategories]
+  const categories = type === 'income' ? incomeCategories : expenseCategories
 
   const handleSave = async () => {
     const parsed = parseFloat(amount)
@@ -63,7 +54,6 @@ export default function EditTransactionModal({
     const ok = await onUpdate(transaction.id, {
       type,
       category_id: categoryId,
-      category_label: categoryLabel,
       amount: parsed,
       note: note.trim() || null,
       date,
@@ -117,25 +107,28 @@ export default function EditTransactionModal({
         <label className="block text-xs text-[var(--text-secondary)] mb-2">
           Categoría
         </label>
-        <div className="grid grid-cols-4 gap-2 mb-4">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              className={`flex flex-col items-center gap-1 p-2 rounded-card transition-all ${
-                categoryId === cat.id
-                  ? 'bg-positive/10 border-2 border-positive'
-                  : 'bg-[var(--bg-secondary)] border-2 border-transparent'
-              }`}
-              onClick={() => {
-                setCategoryId(cat.id)
-                setCategoryLabel(cat.label)
-              }}
-            >
-              <span className="text-lg">{cat.emoji}</span>
-              <span className="text-[10px] font-medium">{cat.label}</span>
-            </button>
-          ))}
-        </div>
+        {categories.length > 0 ? (
+          <div className="grid grid-cols-4 gap-2 mb-4">
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                className={`flex flex-col items-center gap-1 p-2 rounded-card transition-all ${
+                  categoryId === cat.id
+                    ? 'bg-positive/10 border-2 border-positive'
+                    : 'bg-[var(--bg-secondary)] border-2 border-transparent'
+                }`}
+                onClick={() => setCategoryId(cat.id)}
+              >
+                <span className="text-lg">{cat.emoji}</span>
+                <span className="text-[10px] font-medium">{cat.label}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-[var(--text-muted)] mb-4">
+            Sin categorías de {type === 'income' ? 'ingreso' : 'gasto'}
+          </p>
+        )}
 
         {/* Amount */}
         <label className="block text-xs text-[var(--text-secondary)] mb-1">
@@ -191,7 +184,7 @@ export default function EditTransactionModal({
           <Button
             fullWidth
             disabled={
-              !amount || parseFloat(amount) <= 0 || !categoryId || saving
+              !amount || parseFloat(amount) <= 0 || saving
             }
             onClick={handleSave}
           >

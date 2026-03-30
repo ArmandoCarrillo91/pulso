@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
-import { getCategoryEmoji } from '@/lib/categories'
 import { getLocalDateString } from '@/lib/date'
 import { fixedExpensesInPeriod } from '@/lib/calculations'
 import { useTransactions } from '@/hooks/useTransactions'
@@ -15,6 +14,7 @@ import SwipeableRow from '@/components/ui/SwipeableRow'
 import Toast from '@/components/ui/Toast'
 import type { Transaction } from '@/types'
 import Button from '@/components/ui/Button'
+import { HeroSkeleton, BurnBarSkeleton, TransactionListSkeleton } from '@/components/ui/Skeleton'
 
 const MONTHS_SHORT = [
   'ene', 'feb', 'mar', 'abr', 'may', 'jun',
@@ -26,6 +26,7 @@ interface LogEntry {
   kind: 'transaction' | 'fixed' | 'plan'
   date: string
   label: string
+  emoji?: string
   subtitle?: string
   amount: number
   type: 'income' | 'expense'
@@ -155,7 +156,8 @@ export default function HomePage() {
         id: t.id,
         kind: 'transaction' as const,
         date: t.date,
-        label: t.category_label,
+        label: t.category?.label || 'Sin categoría',
+        emoji: t.category?.emoji,
         amount: t.amount,
         type: t.type,
         projected: false,
@@ -270,7 +272,7 @@ export default function HomePage() {
 
   // Carryover: balance from before current fortnight's income
   const lastQuincena = transactions.find(
-    (t) => t.type === 'income' && t.category_id === 'quincena'
+    (t) => t.type === 'income' && t.category?.slug?.startsWith('quincena')
   )
   const carryover = lastQuincena
     ? lastQuincena.balance_before
@@ -324,45 +326,54 @@ export default function HomePage() {
       </div>
 
       {/* Hero */}
-      <div className="text-center mb-8">
-        <p className="text-sm text-[var(--text-secondary)] mb-2">
-          Disponible por día
-        </p>
-        <p
-          className={`text-5xl font-bold mb-5 ${
-            dailyBudget >= 0 ? 'text-positive' : 'text-negative'
-          }`}
-        >
-          {formatMoney(dailyBudget)}
-        </p>
+      {loading ? (
+        <>
+          <HeroSkeleton />
+          <BurnBarSkeleton />
+        </>
+      ) : (
+        <>
+          <div className="text-center mb-8">
+            <p className="text-sm text-[var(--text-secondary)] mb-2">
+              Disponible por día
+            </p>
+            <p
+              className={`text-5xl font-bold mb-5 ${
+                dailyBudget >= 0 ? 'text-positive' : 'text-negative'
+              }`}
+            >
+              {formatMoney(dailyBudget)}
+            </p>
 
-        <p className="text-xs text-[var(--text-muted)] mb-1.5">
-          {daysRemaining} {daysRemaining === 1 ? 'día restante' : 'días restantes'}
-        </p>
-        <p className="text-sm font-semibold text-[var(--text-secondary)]">
-          {formatMoney(currentBalance)} disponibles hasta quincena
-        </p>
-      </div>
+            <p className="text-xs text-[var(--text-muted)] mb-1.5">
+              {daysRemaining} {daysRemaining === 1 ? 'día restante' : 'días restantes'}
+            </p>
+            <p className="text-sm font-semibold text-[var(--text-secondary)]">
+              Total {formatMoney(currentBalance)}
+            </p>
+          </div>
 
-      <div className="mb-6">
-        <div className="h-1.5 rounded-full bg-[var(--bg-secondary)] overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{
-              width: `${Math.min(burnPct, 1) * 100}%`,
-              backgroundColor: burnColor,
-            }}
-          />
-        </div>
-        <div className="flex justify-between mt-1.5">
-          <span className="text-[11px] text-[var(--text-muted)]">
-            Gastado {formatMoney(spentThisPeriod)}
-          </span>
-          <span className="text-[11px] text-[var(--text-muted)]">
-            Disponible {formatMoney(currentBalance)}
-          </span>
-        </div>
-      </div>
+          <div className="mb-6">
+            <div className="h-1.5 rounded-full bg-[var(--bg-secondary)] overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${Math.min(burnPct, 1) * 100}%`,
+                  backgroundColor: burnColor,
+                }}
+              />
+            </div>
+            <div className="flex justify-between mt-1.5">
+              <span className="text-[11px] text-[var(--text-muted)]">
+                Gastado {formatMoney(spentThisPeriod)}
+              </span>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                Disponible {formatMoney(currentBalance)}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
       <Button fullWidth onClick={() => setModalOpen(true)}>
         + Anotar
@@ -411,7 +422,8 @@ export default function HomePage() {
         </div>
 
         {/* Unified List */}
-        {sections.length === 0 && (
+        {loading && <TransactionListSkeleton />}
+        {!loading && sections.length === 0 && (
           <p className="text-center text-[var(--text-muted)] text-sm py-8">
             Sin movimientos en {MONTHS_SHORT[activeMonth.month]}
           </p>
@@ -445,8 +457,8 @@ export default function HomePage() {
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          {isTransaction && (
-                            <span className="text-sm">{getCategoryEmoji(entry.transaction!.category_id)}</span>
+                          {entry.emoji && (
+                            <span className="text-sm">{entry.emoji}</span>
                           )}
                           <p className="text-sm font-medium truncate">{entry.label}</p>
                           {entry.badge && (

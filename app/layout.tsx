@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Plus_Jakarta_Sans } from 'next/font/google'
+import { AppProvider } from './context/AppContext'
 import ConditionalNav from '@/components/ui/ConditionalNav'
 import './globals.css'
 
@@ -29,10 +30,12 @@ export default function RootLayout({
   return (
     <html lang="es" className={plusJakarta.variable}>
       <body className="font-sans antialiased min-h-screen">
-        <main className="mx-auto max-w-app min-h-screen">
-          {children}
-        </main>
-        <ConditionalNav />
+        <AppProvider>
+          <main className="mx-auto max-w-app min-h-screen">
+            {children}
+          </main>
+          <ConditionalNav />
+        </AppProvider>
       </body>
     </html>
   )

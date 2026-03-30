@@ -26,17 +26,20 @@ export async function proxy(request: NextRequest) {
     }
   )
 
+  // Use getSession() instead of getUser() — reads cookies only,
+  // no network round-trip to Supabase auth server.
+  // This eliminates the 200-500ms lag on every navigation.
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
 
-  if (!user && !request.nextUrl.pathname.startsWith('/login')) {
+  if (!session && !request.nextUrl.pathname.startsWith('/login')) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  if (user && request.nextUrl.pathname.startsWith('/login')) {
+  if (session && request.nextUrl.pathname.startsWith('/login')) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)

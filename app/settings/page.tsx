@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { useFixedExpenses } from '@/hooks/useFixedExpenses'
-import { loadCustomCategories } from '@/lib/categories'
+import { useCategories } from '@/hooks/useCategories'
 
 export default function SettingsPage() {
   const { expenses } = useFixedExpenses()
+  const { categories } = useCategories()
   const supabase = createClient()
   const router = useRouter()
 
@@ -39,8 +40,6 @@ export default function SettingsPage() {
     await supabase.auth.signOut()
     router.push('/login')
   }
-
-  const customCount = loadCustomCategories().length
 
   return (
     <div className="min-h-screen p-4" style={{ paddingBottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
@@ -83,7 +82,7 @@ export default function SettingsPage() {
           <div className="flex-1">
             <p className="text-sm font-semibold">Categorías</p>
             <p className="text-xs text-[var(--text-muted)]">
-              {customCount > 0 ? `${customCount} personalizadas` : 'Predeterminadas'}
+              {categories.length} {categories.length === 1 ? 'categoría' : 'categorías'}
             </p>
           </div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -83,7 +83,7 @@ export default function SwipeableRow({
     <>
       <div className="relative overflow-hidden rounded-btn">
         {/* Red delete background (left side) */}
-        {deletable && (
+        {deletable && offset < -10 && (
           <div className="absolute inset-y-0 left-0 w-full bg-negative flex items-center pl-5 gap-2 text-white text-[10px] font-semibold rounded-btn">
             <span>🗑</span>
             Eliminar
@@ -91,7 +91,7 @@ export default function SwipeableRow({
         )}
 
         {/* Green edit background (right side) */}
-        {onEdit && (
+        {onEdit && offset > 10 && (
           <div className="absolute inset-y-0 right-0 w-full bg-positive flex items-center justify-end pr-5 gap-2 text-white text-[10px] font-semibold rounded-btn">
             Editar
             <span>✏️</span>
