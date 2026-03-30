@@ -7,6 +7,7 @@ import type { Plan } from '@/types'
 export function usePlans() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
+  const [toastMsg, setToastMsg] = useState('')
   const supabase = createClient()
 
   const fetchPlans = useCallback(async () => {
@@ -44,6 +45,11 @@ export function usePlans() {
     } = await supabase.auth.getUser()
     if (!user) return null
 
+    // Optimistic
+    const tempId = `temp-${Date.now()}`
+    const optimistic = { ...plan, id: tempId, user_id: user.id } as Plan
+    setPlans((prev) => [...prev, optimistic])
+
     const { data, error } = await supabase
       .from('plans')
       .insert({ ...plan, user_id: user.id })
@@ -51,10 +57,13 @@ export function usePlans() {
       .single()
 
     if (error) {
+      setPlans((prev) => prev.filter((p) => p.id !== tempId))
+      setToastMsg('Error al crear plan. Intenta de nuevo.')
       console.error('Error creating plan:', JSON.stringify(error))
       return null
     }
-    await fetchPlans()
+
+    setPlans((prev) => prev.map((p) => (p.id === tempId ? data : p)))
     return data
   }
 
@@ -64,8 +73,15 @@ export function usePlans() {
   }
 
   const deletePlan = async (id: string) => {
+    const removed = plans.find((p) => p.id === id)
+    setPlans((prev) => prev.filter((p) => p.id !== id))
+
     const { error } = await supabase.from('plans').delete().eq('id', id)
-    if (!error) await fetchPlans()
+    if (error) {
+      if (removed) setPlans((prev) => [...prev, removed])
+      setToastMsg('Error al eliminar. Intenta de nuevo.')
+      console.error('Error deleting plan:', JSON.stringify(error))
+    }
   }
 
   const reorderPlans = async (reordered: Plan[]) => {
@@ -86,6 +102,8 @@ export function usePlans() {
     updatePlan,
     deletePlan,
     reorderPlans,
+    toastMsg,
+    clearToast: () => setToastMsg(''),
     refetch: fetchPlans,
   }
 }

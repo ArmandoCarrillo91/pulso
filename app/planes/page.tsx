@@ -7,6 +7,7 @@ import { usePayday } from '@/hooks/usePayday'
 import PlanWizardModal from '@/components/modals/PlanWizardModal'
 import EditPlanModal from '@/components/modals/EditPlanModal'
 import SwipeableRow from '@/components/ui/SwipeableRow'
+import Toast from '@/components/ui/Toast'
 import ProgressBar from '@/components/ui/ProgressBar'
 import Button from '@/components/ui/Button'
 import type { Plan, PlanType } from '@/types'
@@ -60,6 +61,8 @@ export default function PlanesPage() {
     createPlan,
     updatePlan,
     deletePlan,
+    toastMsg,
+    clearToast,
   } = usePlans()
   const { currentBalance } = useTransactions()
   const { daysRemaining, nextPayday } = usePayday()
@@ -68,12 +71,10 @@ export default function PlanesPage() {
 
   return (
     <div className="min-h-screen p-4 pb-24">
-      {/* Header */}
       <div className="mb-6">
         <h1 className="text-lg font-bold">Mis planes</h1>
       </div>
 
-      {/* Plan cards */}
       {loading && (
         <p className="text-center text-[var(--text-secondary)] py-8">Cargando...</p>
       )}
@@ -95,7 +96,7 @@ export default function PlanesPage() {
           return (
             <SwipeableRow
               key={plan.id}
-              onTap={() => setEditingPlan(plan)}
+              onEdit={() => setEditingPlan(plan)}
               onDelete={() => deletePlan(plan.id)}
             >
               <div className="card">
@@ -106,30 +107,23 @@ export default function PlanesPage() {
                     {badge.label}
                   </span>
                 </div>
-
                 <p className="text-xs text-[var(--text-secondary)] mb-2">
                   ${fmt(plan.amount_per_fortnight)}/quincena · {plan.time_value} quincenas
                 </p>
-
                 <ProgressBar progress={progress} className="mb-1.5" />
-
-                <p className="text-[11px] text-[var(--text-muted)]">
-                  {planEta(plan)}
-                </p>
+                <p className="text-[11px] text-[var(--text-muted)]">{planEta(plan)}</p>
               </div>
             </SwipeableRow>
           )
         })}
       </div>
 
-      {/* Edit Plan Modal */}
       <EditPlanModal
         plan={editingPlan}
         onClose={() => setEditingPlan(null)}
         onUpdate={updatePlan}
       />
 
-      {/* Plan Wizard */}
       <PlanWizardModal
         isOpen={wizardOpen}
         onClose={() => setWizardOpen(false)}
@@ -139,6 +133,8 @@ export default function PlanesPage() {
         daysRemaining={daysRemaining}
         nextPayday={nextPayday}
       />
+
+      <Toast message={toastMsg} visible={!!toastMsg} onHide={clearToast} />
     </div>
   )
 }

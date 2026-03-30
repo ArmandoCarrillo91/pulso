@@ -12,6 +12,7 @@ import { usePayday } from '@/hooks/usePayday'
 import TransactionModal from '@/components/modals/TransactionModal'
 import EditTransactionModal from '@/components/modals/EditTransactionModal'
 import SwipeableRow from '@/components/ui/SwipeableRow'
+import Toast from '@/components/ui/Toast'
 import type { Transaction } from '@/types'
 import Button from '@/components/ui/Button'
 import Chip from '@/components/ui/Chip'
@@ -101,6 +102,8 @@ export default function HomePage() {
     updateTransaction,
     deleteTransaction,
     daysSinceLastIncome,
+    toastMsg,
+    clearToast,
   } = useTransactions()
   const { plans, totalSavingsPerFortnight } = usePlans()
   const { expenses, createExpense } = useFixedExpenses()
@@ -481,7 +484,7 @@ export default function HomePage() {
                     return (
                       <SwipeableRow
                         key={entry.id}
-                        onTap={() => setEditingTransaction(entry.transaction!)}
+                        onEdit={() => setEditingTransaction(entry.transaction!)}
                         onDelete={() => deleteTransaction(entry.transaction!.id)}
                       >
                         {rowContent}
@@ -516,6 +519,8 @@ export default function HomePage() {
         daysUntilNextPayday={daysRemaining}
         currentFortnight={currentFortnight}
       />
+
+      <Toast message={toastMsg} visible={!!toastMsg} onHide={clearToast} />
     </div>
   )
 }

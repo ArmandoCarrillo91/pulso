@@ -17,7 +17,8 @@ export const EXPENSE_CATEGORIES = [
   { id: 'ocio', label: 'Ocio', emoji: '🎬' },
   { id: 'salud', label: 'Salud', emoji: '💊' },
   { id: 'compras', label: 'Compras', emoji: '🛍️' },
-  { id: 'renta', label: 'Renta / Hipoteca', emoji: '🏠' },
+  { id: 'renta', label: 'Renta', emoji: '🏠' },
+  { id: 'hipoteca', label: 'Hipoteca', emoji: '🏦' },
   { id: 'educacion', label: 'Educación', emoji: '📚' },
   { id: 'otro-gasto', label: 'Otro', emoji: '📦' },
 ]

@@ -7,6 +7,7 @@ import type { Transaction } from '@/types'
 export function useTransactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
+  const [toastMsg, setToastMsg] = useState('')
   const supabase = createClient()
 
   const fetchTransactions = useCallback(async () => {
@@ -60,6 +61,17 @@ export function useTransactions() {
     } = await supabase.auth.getUser()
     if (!user) return null
 
+    // Optimistic: add immediately
+    const tempId = `temp-${Date.now()}`
+    const optimistic = {
+      ...transaction,
+      id: tempId,
+      user_id: user.id,
+      created_at: new Date().toISOString(),
+    } as Transaction
+
+    setTransactions((prev) => [optimistic, ...prev])
+
     const { data, error } = await supabase
       .from('transactions')
       .insert({ ...transaction, user_id: user.id })
@@ -67,9 +79,17 @@ export function useTransactions() {
       .single()
 
     if (error) {
+      // Rollback
+      setTransactions((prev) => prev.filter((t) => t.id !== tempId))
+      setToastMsg('Error al guardar. Intenta de nuevo.')
       console.error('Error creating transaction:', JSON.stringify(error))
       return null
     }
+
+    // Replace temp with real
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === tempId ? (data as Transaction) : t))
+    )
     return data as Transaction
   }
 
@@ -91,16 +111,22 @@ export function useTransactions() {
   }
 
   const deleteTransaction = async (id: string) => {
+    // Optimistic: remove immediately
+    const removed = transactions.find((t) => t.id === id)
+    setTransactions((prev) => prev.filter((t) => t.id !== id))
+
     const { error } = await supabase
       .from('transactions')
       .delete()
       .eq('id', id)
 
     if (error) {
+      // Rollback
+      if (removed) setTransactions((prev) => [removed, ...prev])
+      setToastMsg('Error al eliminar. Intenta de nuevo.')
       console.error('Error deleting transaction:', JSON.stringify(error))
       return false
     }
-    await fetchTransactions()
     return true
   }
 
@@ -119,6 +145,8 @@ export function useTransactions() {
     updateTransaction,
     deleteTransaction,
     daysSinceLastIncome,
+    toastMsg,
+    clearToast: () => setToastMsg(''),
     refetch: fetchTransactions,
   }
 }

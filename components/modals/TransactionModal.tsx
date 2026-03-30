@@ -26,6 +26,8 @@ interface TransactionModalProps {
     day_of_month: number
     category_id: string | null
     category_label: string | null
+    next_payment_date: string | null
+    end_date: string | null
   }) => Promise<unknown>
   plans: Plan[]
   currentBalance: number
@@ -203,6 +205,8 @@ export default function TransactionModal({
         day_of_month: day,
         category_id: categoryId,
         category_label: categoryLabel,
+        next_payment_date: null,
+        end_date: null,
       })
     }
 

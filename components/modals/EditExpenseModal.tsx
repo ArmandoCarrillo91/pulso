@@ -2,8 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import { EXPENSE_CATEGORIES } from '@/lib/categories'
+import { getLocalDateString } from '@/lib/date'
 import Button from '@/components/ui/Button'
 import type { FixedExpense } from '@/types'
+
+const END_DATE_OPTIONS = [
+  { label: 'Sin fecha de fin', value: '' },
+  { label: '3 meses', months: 3 },
+  { label: '6 meses', months: 6 },
+  { label: '1 año', months: 12 },
+  { label: '2 años', months: 24 },
+  { label: 'Fecha específica', value: 'custom' },
+]
 
 interface EditExpenseModalProps {
   expense: FixedExpense | null
@@ -18,7 +28,9 @@ export default function EditExpenseModal({
 }: EditExpenseModalProps) {
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
-  const [dayOfMonth, setDayOfMonth] = useState('')
+  const [nextPaymentDate, setNextPaymentDate] = useState('')
+  const [endDateOption, setEndDateOption] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [categoryLabel, setCategoryLabel] = useState('')
   const [saving, setSaving] = useState(false)
@@ -27,26 +39,56 @@ export default function EditExpenseModal({
     if (expense) {
       setName(expense.name)
       setAmount(String(expense.amount))
-      setDayOfMonth(String(expense.day_of_month))
       setCategoryId(expense.category_id || '')
       setCategoryLabel(expense.category_label || '')
+
+      if (expense.next_payment_date) {
+        setNextPaymentDate(expense.next_payment_date)
+      } else {
+        const d = new Date()
+        d.setMonth(d.getMonth() + 1)
+        d.setDate(expense.day_of_month)
+        setNextPaymentDate(getLocalDateString(d))
+      }
+
+      if (expense.end_date) {
+        setEndDateOption('custom')
+        setCustomEndDate(expense.end_date)
+      } else {
+        setEndDateOption('')
+      }
     }
   }, [expense])
 
   if (!expense) return null
 
+  const resolveEndDate = (): string | null => {
+    if (!endDateOption) return null
+    if (endDateOption === 'custom') return customEndDate || null
+    const opt = END_DATE_OPTIONS.find((o) => 'months' in o && o.label === endDateOption)
+    if (opt && 'months' in opt) {
+      const d = new Date()
+      d.setMonth(d.getMonth() + opt.months!)
+      return getLocalDateString(d)
+    }
+    return null
+  }
+
   const handleSave = async () => {
     const amt = parseFloat(amount)
-    const day = parseInt(dayOfMonth)
-    if (!name.trim() || !amt || !day) return
+    if (!name.trim() || !amt) return
     setSaving(true)
+
+    const payDate = nextPaymentDate ? new Date(nextPaymentDate + 'T12:00:00') : new Date()
 
     await onUpdate(expense.id, {
       name: name.trim(),
       amount: amt,
-      day_of_month: day,
+      day_of_month: payDate.getDate(),
       category_id: categoryId || null,
       category_label: categoryLabel || null,
+      next_payment_date: nextPaymentDate || null,
+      end_date: resolveEndDate(),
     })
     setSaving(false)
     onClose()
@@ -67,8 +109,24 @@ export default function EditExpenseModal({
           <input type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="input-field flex-1" />
         </div>
 
-        <label className="block text-xs text-[var(--text-secondary)] mb-1">Día del mes</label>
-        <input type="number" inputMode="numeric" value={dayOfMonth} onChange={(e) => setDayOfMonth(e.target.value)} min={1} max={31} className="input-field mb-3" />
+        <label className="block text-xs text-[var(--text-secondary)] mb-1">Próximo pago</label>
+        <input type="date" value={nextPaymentDate} onChange={(e) => setNextPaymentDate(e.target.value)} className="input-field mb-3" />
+
+        <label className="block text-xs text-[var(--text-secondary)] mb-1">¿Hasta cuándo?</label>
+        <select
+          value={endDateOption}
+          onChange={(e) => setEndDateOption(e.target.value)}
+          className="input-field mb-3"
+        >
+          {END_DATE_OPTIONS.map((opt) => (
+            <option key={opt.label} value={'months' in opt ? opt.label : opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        {endDateOption === 'custom' && (
+          <input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)} className="input-field mb-3" />
+        )}
 
         <label className="block text-xs text-[var(--text-secondary)] mb-2">Categoría</label>
         <div className="grid grid-cols-4 gap-2 mb-6">
