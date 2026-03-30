@@ -289,21 +289,6 @@ export default function HomePage() {
   if (burnPct < timePct - 0.1) burnColor = '#16a34a' // green — ahead
   else if (burnPct > timePct + 0.1) burnColor = '#dc2626' // red — overspending
 
-  // Trend: compare spending vs previous fortnight
-  // Previous fortnight = transactions between the payday before previousPayday and previousPayday
-  const prevPrevPayday = new Date(previousPayday)
-  prevPrevPayday.setDate(prevPrevPayday.getDate() - 15)
-  const prevPrevStr = getLocalDateString(prevPrevPayday)
-  const lastFortnightSpent = transactions
-    .filter(
-      (t) =>
-        t.type === 'expense' &&
-        t.date >= prevPrevStr &&
-        t.date < prevPaydayStr
-    )
-    .reduce((sum, t) => sum + t.amount, 0)
-  const trendDiff = lastFortnightSpent > 0 ? spentThisPeriod - lastFortnightSpent : null
-
   const today = new Date()
   const dateStr = today.toLocaleDateString('es-MX', {
     weekday: 'long',
@@ -362,20 +347,9 @@ export default function HomePage() {
         <p className="text-xs text-[var(--text-muted)] mb-1.5">
           {daysRemaining} {daysRemaining === 1 ? 'día restante' : 'días restantes'}
         </p>
-        <p className="text-sm font-semibold text-[var(--text-secondary)] mb-1.5">
+        <p className="text-sm font-semibold text-[var(--text-secondary)]">
           {formatMoney(currentBalance)} disponibles hasta quincena
         </p>
-        {trendDiff !== null && (
-          <p
-            className={`text-xs ${
-              trendDiff > 0 ? 'text-negative' : 'text-positive'
-            }`}
-          >
-            {trendDiff > 0
-              ? `↑ ${formatMoney(trendDiff)} más que la quincena pasada`
-              : `↓ ${formatMoney(Math.abs(trendDiff))} menos que la quincena pasada`}
-          </p>
-        )}
       </div>
 
       <div className="mb-6">
