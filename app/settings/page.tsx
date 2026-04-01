@@ -4,11 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
-import { useFixedExpenses } from '@/hooks/useFixedExpenses'
 import { useCategories } from '@/hooks/useCategories'
 
 export default function SettingsPage() {
-  const { expenses } = useFixedExpenses()
   const { categories } = useCategories()
   const supabase = createClient()
   const router = useRouter()
@@ -54,24 +52,6 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-2">
-        {/* Fixed Expenses */}
-        <Link
-          href="/settings/fixed-expenses"
-          className="flex items-center gap-3 p-4 rounded-card bg-[var(--bg-card)]"
-          style={{ border: '0.5px solid var(--pill-border)' }}
-        >
-          <span className="text-xl">💳</span>
-          <div className="flex-1">
-            <p className="text-sm font-semibold">Gastos fijos</p>
-            <p className="text-xs text-[var(--text-muted)]">
-              {expenses.length} {expenses.length === 1 ? 'gasto fijo' : 'gastos fijos'}
-            </p>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </Link>
-
         {/* Categories */}
         <Link
           href="/settings/categories"

@@ -7,7 +7,7 @@ import { detectPlatform } from '@/lib/utils'
 import { useCategories } from '@/hooks/useCategories'
 import Button from '@/components/ui/Button'
 import StarRating from '@/components/ui/StarRating'
-import type { Transaction, Plan, Category } from '@/types'
+import type { Transaction, Category } from '@/types'
 
 interface TransactionModalProps {
   isOpen: boolean
@@ -15,22 +15,6 @@ interface TransactionModalProps {
   onSave: (
     transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'>
   ) => Promise<Transaction | null>
-  onCreateFixedExpense?: (expense: {
-    name: string
-    amount: number
-    day_of_month: number
-    category_id: string | null
-    next_payment_date: string | null
-    end_date: string | null
-    last_paid_date: string | null
-    start_date: string | null
-    total_installments: number | null
-    paid_installments: number
-    expense_type: 'fixed' | 'msi'
-    completed_at: string | null
-    total_amount: number | null
-  }) => Promise<unknown>
-  plans: Plan[]
   currentBalance: number
   daysSinceLastIncome: number | null
   daysUntilNextPayday: number
@@ -41,8 +25,6 @@ export default function TransactionModal({
   isOpen,
   onClose,
   onSave,
-  onCreateFixedExpense,
-  plans,
   currentBalance,
   daysSinceLastIncome,
   daysUntilNextPayday,
@@ -57,8 +39,6 @@ export default function TransactionModal({
   const [saving, setSaving] = useState(false)
   const [categoryChanges, setCategoryChanges] = useState(0)
   const [date, setDate] = useState('')
-  const [isRecurring, setIsRecurring] = useState(false)
-  const [recurringDay, setRecurringDay] = useState('')
 
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
 
@@ -92,8 +72,6 @@ export default function TransactionModal({
       prevCategoryRef.current = null
       savedIdRef.current = null
       setDate(getLocalDateString())
-      setIsRecurring(false)
-      setRecurringDay('')
       setShowCustomForm(false)
       setShowMore(false)
       setCustomEmoji('')
@@ -201,26 +179,6 @@ export default function TransactionModal({
 
     const result = await onSave(transaction)
 
-    if (result && isRecurring && onCreateFixedExpense) {
-      const day = parseInt(recurringDay) || new Date().getDate()
-      const selectedCat = allCategories.find((c) => c.id === categoryId)
-      await onCreateFixedExpense({
-        name: selectedCat?.label || 'Gasto fijo',
-        amount: parsed,
-        day_of_month: day,
-        category_id: categoryId,
-        next_payment_date: null,
-        end_date: null,
-        last_paid_date: null,
-        start_date: null,
-        total_installments: null,
-        paid_installments: 0,
-        expense_type: 'fixed',
-        completed_at: null,
-        total_amount: null,
-      })
-    }
-
     setSaving(false)
 
     if (result) {
@@ -262,13 +220,7 @@ export default function TransactionModal({
     overflowUsed.length > 0 ||
     (!isOnboarding && unusedCategories.length > 0)
 
-  const totalSavings = plans.reduce(
-    (sum, p) => sum + p.amount_per_fortnight,
-    0
-  )
   const selectedCat = allCategories.find((c) => c.id === categoryId)
-  const showSavingsNote =
-    selectedCat?.slug?.startsWith('quincena') && plans.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
@@ -494,12 +446,6 @@ export default function TransactionModal({
         {step === 3 && (
           <div>
             <h2 className="text-lg font-bold mb-4">Monto</h2>
-            {showSavingsNote && (
-              <p className="text-sm text-positive bg-positive/10 p-3 rounded-btn mb-4">
-                Se apartarán ${totalSavings.toLocaleString()} para tus{' '}
-                {plans.length} planes de ahorro
-              </p>
-            )}
             <div className="flex items-center justify-center mb-4">
               <span className="text-4xl font-bold mr-1">$</span>
               <input
@@ -530,46 +476,7 @@ export default function TransactionModal({
               className="input-field mb-3"
             />
 
-            {/* Recurring toggle */}
-            {type === 'expense' && onCreateFixedExpense && (
-              <div className="mb-6">
-                <button
-                  type="button"
-                  onClick={() => setIsRecurring(!isRecurring)}
-                  className="flex items-center gap-2 text-sm"
-                >
-                  <span
-                    className={`w-9 h-5 rounded-full transition-colors relative ${
-                      isRecurring ? 'bg-positive' : 'bg-[var(--border-color)]'
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                        isRecurring ? 'translate-x-4' : 'translate-x-0.5'
-                      }`}
-                    />
-                  </span>
-                  <span className="text-[var(--text-secondary)]">¿Se repite cada mes?</span>
-                </button>
-                {isRecurring && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <label className="text-xs text-[var(--text-secondary)]">Día del mes:</label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={recurringDay}
-                      onChange={(e) => setRecurringDay(e.target.value)}
-                      placeholder={String(new Date().getDate())}
-                      min={1}
-                      max={31}
-                      className="input-field w-20"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {type !== 'expense' && <div className="mb-3" />}
+            <div className="mb-3" />
             <div className="flex gap-3">
               <Button variant="secondary" onClick={() => setStep(2)}>
                 Atrás

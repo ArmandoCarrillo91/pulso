@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react'
 import { createClient } from '@/lib/supabase'
-import type { Transaction, Plan, FixedExpense, Category } from '@/types'
+import type { Transaction, Commitment, Category } from '@/types'
 
 interface AppContextValue {
   // Categories
@@ -42,28 +42,19 @@ interface AppContextValue {
   transactionToast: string
   clearTransactionToast: () => void
 
-  // Plans
-  plans: Plan[]
-  plansLoading: boolean
-  totalSavingsPerFortnight: number
-  createPlan: (plan: Omit<Plan, 'id' | 'user_id'>) => Promise<Plan | null>
-  updatePlan: (id: string, updates: Partial<Plan>) => Promise<void>
-  deletePlan: (id: string) => Promise<void>
-  reorderPlans: (reordered: Plan[]) => Promise<void>
-  planToast: string
-  clearPlanToast: () => void
-
-  // Fixed Expenses
-  expenses: FixedExpense[]
-  expensesLoading: boolean
-  createExpense: (
-    e: Omit<FixedExpense, 'id' | 'user_id' | 'category'>
-  ) => Promise<FixedExpense | null>
-  updateExpense: (
+  // Commitments
+  commitments: Commitment[]
+  commitmentsLoading: boolean
+  createCommitment: (
+    c: Omit<Commitment, 'id' | 'user_id' | 'category' | 'created_at'>
+  ) => Promise<Commitment | null>
+  updateCommitment: (
     id: string,
-    updates: Partial<FixedExpense>
+    updates: Partial<Commitment>
   ) => Promise<void>
-  deleteExpense: (id: string) => Promise<void>
+  deleteCommitment: (id: string) => Promise<void>
+  commitmentToast: string
+  clearCommitmentToast: () => void
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -71,7 +62,6 @@ const AppContext = createContext<AppContextValue | null>(null)
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
 
-  // Cache user ID so we only call getUser() once on mount
   const userIdRef = useRef<string | null>(null)
 
   const getUserId = useCallback(async () => {
@@ -128,25 +118,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       const tempId = `temp-${Date.now()}`
       const optimistic = {
-        ...data,
-        id: tempId,
-        user_id: userId,
-        slug,
-        sort_order: categories.length,
-        created_at: new Date().toISOString(),
+        ...data, id: tempId, user_id: userId, slug,
+        sort_order: categories.length, created_at: new Date().toISOString(),
       } as Category
       setCategories((prev) => [...prev, optimistic])
 
       const { data: result, error } = await supabase
         .from('categories')
         .insert({
-          user_id: userId,
-          slug,
-          label: data.label,
-          emoji: data.emoji || '📦',
-          type: data.type,
-          parent_id: data.parent_id,
-          sort_order: categories.length,
+          user_id: userId, slug, label: data.label,
+          emoji: data.emoji || '📦', type: data.type,
+          parent_id: data.parent_id, sort_order: categories.length,
         })
         .select()
         .single()
@@ -157,31 +139,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return null
       }
 
-      setCategories((prev) =>
-        prev.map((c) => (c.id === tempId ? result : c))
-      )
+      setCategories((prev) => prev.map((c) => (c.id === tempId ? result : c)))
       return result as Category
     },
     [supabase, getUserId, categories.length]
   )
 
   const updateCategory = useCallback(
-    async (
-      id: string,
-      updates: Partial<Pick<Category, 'label' | 'emoji' | 'sort_order'>>
-    ) => {
-      setCategories((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
-      )
-
-      const { error } = await supabase
-        .from('categories')
-        .update(updates)
-        .eq('id', id)
-
-      if (error) {
-        await fetchCategories()
-      }
+    async (id: string, updates: Partial<Pick<Category, 'label' | 'emoji' | 'sort_order'>>) => {
+      setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
+      const { error } = await supabase.from('categories').update(updates).eq('id', id)
+      if (error) await fetchCategories()
     },
     [supabase, fetchCategories]
   )
@@ -193,16 +161,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         removed = prev.find((c) => c.id === id)
         return prev.filter((c) => c.id !== id)
       })
-
-      const { error } = await supabase
-        .from('categories')
-        .delete()
-        .eq('id', id)
-
-      if (error) {
-        if (removed) setCategories((prev) => [...prev, removed!])
-        console.error('Error deleting category:', JSON.stringify(error))
-      }
+      const { error } = await supabase.from('categories').delete().eq('id', id)
+      if (error && removed) setCategories((prev) => [...prev, removed!])
     },
     [supabase]
   )
@@ -232,51 +192,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [supabase, getUserId])
 
   useEffect(() => {
-    // Keepalive: fire-and-forget ping to wake Supabase free-tier DB
     supabase.from('transactions').select('id').limit(1).then(() => {})
-
     fetchTransactions()
 
     const channel = supabase
       .channel('transactions-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'pulso', table: 'transactions' },
-        () => fetchTransactions()
-      )
+      .on('postgres_changes', { event: '*', schema: 'pulso', table: 'transactions' }, () => fetchTransactions())
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
   }, [supabase, fetchTransactions])
 
   const currentBalance = transactions.reduce(
-    (sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount),
-    0
+    (sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0
   )
 
   const createTransaction = useCallback(
-    async (
-      transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'>
-    ) => {
+    async (transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'>) => {
       const userId = await getUserId()
       if (!userId) return null
 
       const tempId = `temp-${Date.now()}`
-      // Find category from context for optimistic display
       const cat = categories.find((c) => c.id === transaction.category_id)
       const optimistic = {
-        ...transaction,
-        id: tempId,
-        user_id: userId,
-        created_at: new Date().toISOString(),
-        category: cat || undefined,
+        ...transaction, id: tempId, user_id: userId,
+        created_at: new Date().toISOString(), category: cat || undefined,
       } as Transaction
 
       setTransactions((prev) => [optimistic, ...prev])
 
-      // Don't send category to insert — it's a joined field
       const { category: _, ...insertData } = transaction as Transaction & { category?: unknown }
       const { data, error } = await supabase
         .from('transactions')
@@ -291,9 +235,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return null
       }
 
-      setTransactions((prev) =>
-        prev.map((t) => (t.id === tempId ? (data as Transaction) : t))
-      )
+      setTransactions((prev) => prev.map((t) => (t.id === tempId ? (data as Transaction) : t)))
       return data as Transaction
     },
     [supabase, getUserId, categories]
@@ -301,18 +243,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const updateTransaction = useCallback(
     async (id: string, updates: Partial<Transaction>) => {
-      setTransactions((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
-      )
-
-      // Strip joined fields before sending to DB
+      setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)))
       const { category: _, ...dbUpdates } = updates as Transaction & { category?: unknown }
-
-      const { error } = await supabase
-        .from('transactions')
-        .update(dbUpdates)
-        .eq('id', id)
-
+      const { error } = await supabase.from('transactions').update(dbUpdates).eq('id', id)
       if (error) {
         console.error('Error updating transaction:', JSON.stringify(error))
         await fetchTransactions()
@@ -331,16 +264,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         removed = prev.find((t) => t.id === id)
         return prev.filter((t) => t.id !== id)
       })
-
-      const { error } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('id', id)
-
+      const { error } = await supabase.from('transactions').delete().eq('id', id)
       if (error) {
         if (removed) setTransactions((prev) => [removed!, ...prev])
         setTransactionToast('Error al eliminar. Intenta de nuevo.')
-        console.error('Error deleting transaction:', JSON.stringify(error))
         return false
       }
       return true
@@ -355,217 +282,89 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return Math.floor(diffMs / (1000 * 60 * 60 * 24))
   })()
 
-  // ─── Plans ───
-  const [plans, setPlans] = useState<Plan[]>([])
-  const [plansLoading, setPlansLoading] = useState(true)
-  const [planToast, setPlanToast] = useState('')
+  // ─── Commitments ───
+  const [commitments, setCommitments] = useState<Commitment[]>([])
+  const [commitmentsLoading, setCommitmentsLoading] = useState(true)
+  const [commitmentToast, setCommitmentToast] = useState('')
 
-  const fetchPlans = useCallback(async () => {
+  const fetchCommitments = useCallback(async () => {
     const userId = await getUserId()
     if (!userId) return
 
     const { data, error } = await supabase
-      .from('plans')
-      .select('*')
-      .eq('user_id', userId)
-      .order('priority', { ascending: true })
-
-    if (error) {
-      console.error('Error fetching plans:', JSON.stringify(error))
-    } else if (data) {
-      setPlans(data)
-    }
-    setPlansLoading(false)
-  }, [supabase, getUserId])
-
-  useEffect(() => {
-    fetchPlans()
-  }, [fetchPlans])
-
-  const totalSavingsPerFortnight = plans.reduce(
-    (sum, p) => sum + p.amount_per_fortnight,
-    0
-  )
-
-  const createPlan = useCallback(
-    async (plan: Omit<Plan, 'id' | 'user_id'>) => {
-      const userId = await getUserId()
-      if (!userId) return null
-
-      const tempId = `temp-${Date.now()}`
-      const optimistic = { ...plan, id: tempId, user_id: userId } as Plan
-      setPlans((prev) => [...prev, optimistic])
-
-      const { data, error } = await supabase
-        .from('plans')
-        .insert({ ...plan, user_id: userId })
-        .select()
-        .single()
-
-      if (error) {
-        setPlans((prev) => prev.filter((p) => p.id !== tempId))
-        setPlanToast('Error al crear plan. Intenta de nuevo.')
-        console.error('Error creating plan:', JSON.stringify(error))
-        return null
-      }
-
-      setPlans((prev) => prev.map((p) => (p.id === tempId ? data : p)))
-      return data
-    },
-    [supabase, getUserId]
-  )
-
-  const updatePlan = useCallback(
-    async (id: string, updates: Partial<Plan>) => {
-      setPlans((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
-      )
-
-      const { error } = await supabase
-        .from('plans')
-        .update(updates)
-        .eq('id', id)
-
-      if (error) {
-        await fetchPlans()
-      } else {
-        await fetchPlans()
-      }
-    },
-    [supabase, fetchPlans]
-  )
-
-  const deletePlan = useCallback(
-    async (id: string) => {
-      let removed: Plan | undefined
-      setPlans((prev) => {
-        removed = prev.find((p) => p.id === id)
-        return prev.filter((p) => p.id !== id)
-      })
-
-      const { error } = await supabase.from('plans').delete().eq('id', id)
-      if (error) {
-        if (removed) setPlans((prev) => [...prev, removed!])
-        setPlanToast('Error al eliminar. Intenta de nuevo.')
-        console.error('Error deleting plan:', JSON.stringify(error))
-      }
-    },
-    [supabase]
-  )
-
-  const reorderPlans = useCallback(
-    async (reordered: Plan[]) => {
-      setPlans(reordered)
-      for (let i = 0; i < reordered.length; i++) {
-        await supabase
-          .from('plans')
-          .update({ priority: i + 1 })
-          .eq('id', reordered[i].id)
-      }
-    },
-    [supabase]
-  )
-
-  // ─── Fixed Expenses ───
-  const [expenses, setExpenses] = useState<FixedExpense[]>([])
-  const [expensesLoading, setExpensesLoading] = useState(true)
-
-  const fetchExpenses = useCallback(async () => {
-    const userId = await getUserId()
-    if (!userId) return
-
-    const { data, error } = await supabase
-      .from('fixed_expenses')
+      .from('commitments')
       .select('*, category:categories(id, slug, label, emoji)')
       .eq('user_id', userId)
-      .order('day_of_month', { ascending: true })
+      .order('priority', { ascending: true })
+      .order('created_at', { ascending: true })
 
     if (error) {
-      console.error('Error fetching fixed expenses:', JSON.stringify(error))
+      console.error('Error fetching commitments:', JSON.stringify(error))
     } else if (data) {
-      setExpenses(data as FixedExpense[])
+      setCommitments(data as Commitment[])
     }
-    setExpensesLoading(false)
+    setCommitmentsLoading(false)
   }, [supabase, getUserId])
 
   useEffect(() => {
-    fetchExpenses()
-  }, [fetchExpenses])
+    fetchCommitments()
+  }, [fetchCommitments])
 
-  const createExpense = useCallback(
-    async (expense: Omit<FixedExpense, 'id' | 'user_id' | 'category'>) => {
+  const createCommitment = useCallback(
+    async (commitment: Omit<Commitment, 'id' | 'user_id' | 'category' | 'created_at'>) => {
       const userId = await getUserId()
       if (!userId) return null
 
       const tempId = `temp-${Date.now()}`
-      const cat = categories.find((c) => c.id === expense.category_id)
+      const cat = categories.find((c) => c.id === commitment.category_id)
       const optimistic = {
-        ...expense,
-        id: tempId,
-        user_id: userId,
-        category: cat || undefined,
-      } as FixedExpense
-      setExpenses((prev) => [...prev, optimistic])
+        ...commitment, id: tempId, user_id: userId,
+        created_at: new Date().toISOString(), category: cat || undefined,
+      } as Commitment
+      setCommitments((prev) => [...prev, optimistic])
 
-      const { category: _, ...insertData } = expense as FixedExpense & { category?: unknown }
+      const { category: _, ...insertData } = commitment as Commitment & { category?: unknown }
       const { data, error } = await supabase
-        .from('fixed_expenses')
+        .from('commitments')
         .insert({ ...insertData, user_id: userId })
         .select('*, category:categories(id, slug, label, emoji)')
         .single()
 
       if (error) {
-        setExpenses((prev) => prev.filter((e) => e.id !== tempId))
-        console.error('Error creating expense:', JSON.stringify(error))
+        setCommitments((prev) => prev.filter((c) => c.id !== tempId))
+        setCommitmentToast('Error al crear. Intenta de nuevo.')
+        console.error('Error creating commitment:', JSON.stringify(error))
         return null
       }
 
-      setExpenses((prev) =>
-        prev.map((e) => (e.id === tempId ? (data as FixedExpense) : e))
-      )
-      return data as FixedExpense
+      setCommitments((prev) => prev.map((c) => (c.id === tempId ? (data as Commitment) : c)))
+      return data as Commitment
     },
     [supabase, getUserId, categories]
   )
 
-  const updateExpense = useCallback(
-    async (id: string, updates: Partial<FixedExpense>) => {
-      setExpenses((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, ...updates } : e))
-      )
-
-      const { category: _, ...dbUpdates } = updates as FixedExpense & { category?: unknown }
-
-      const { error } = await supabase
-        .from('fixed_expenses')
-        .update(dbUpdates)
-        .eq('id', id)
-
-      if (error) {
-        await fetchExpenses()
-      } else {
-        await fetchExpenses()
-      }
+  const updateCommitment = useCallback(
+    async (id: string, updates: Partial<Commitment>) => {
+      setCommitments((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
+      const { category: _, ...dbUpdates } = updates as Commitment & { category?: unknown }
+      const { error } = await supabase.from('commitments').update(dbUpdates).eq('id', id)
+      if (error) await fetchCommitments()
+      else await fetchCommitments()
     },
-    [supabase, fetchExpenses]
+    [supabase, fetchCommitments]
   )
 
-  const deleteExpense = useCallback(
+  const deleteCommitment = useCallback(
     async (id: string) => {
-      let removed: FixedExpense | undefined
-      setExpenses((prev) => {
-        removed = prev.find((e) => e.id === id)
-        return prev.filter((e) => e.id !== id)
+      let removed: Commitment | undefined
+      setCommitments((prev) => {
+        removed = prev.find((c) => c.id === id)
+        return prev.filter((c) => c.id !== id)
       })
-
-      const { error } = await supabase
-        .from('fixed_expenses')
-        .delete()
-        .eq('id', id)
-
+      const { error } = await supabase.from('commitments').delete().eq('id', id)
       if (error) {
-        if (removed) setExpenses((prev) => [...prev, removed!])
-        console.error('Error deleting expense:', JSON.stringify(error))
+        if (removed) setCommitments((prev) => [...prev, removed!])
+        setCommitmentToast('Error al eliminar. Intenta de nuevo.')
       }
     },
     [supabase]
@@ -574,39 +373,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider
       value={{
-        categories,
-        incomeCategories,
-        expenseCategories,
-        categoriesLoading,
-        createCategory,
-        updateCategory,
-        deleteCategory,
+        categories, incomeCategories, expenseCategories, categoriesLoading,
+        createCategory, updateCategory, deleteCategory,
 
-        transactions,
-        transactionsLoading,
-        currentBalance,
-        daysSinceLastIncome,
-        createTransaction,
-        updateTransaction,
-        deleteTransaction,
-        transactionToast,
-        clearTransactionToast: () => setTransactionToast(''),
+        transactions, transactionsLoading, currentBalance, daysSinceLastIncome,
+        createTransaction, updateTransaction, deleteTransaction,
+        transactionToast, clearTransactionToast: () => setTransactionToast(''),
 
-        plans,
-        plansLoading,
-        totalSavingsPerFortnight,
-        createPlan,
-        updatePlan,
-        deletePlan,
-        reorderPlans,
-        planToast,
-        clearPlanToast: () => setPlanToast(''),
-
-        expenses,
-        expensesLoading,
-        createExpense,
-        updateExpense,
-        deleteExpense,
+        commitments, commitmentsLoading,
+        createCommitment, updateCommitment, deleteCommitment,
+        commitmentToast, clearCommitmentToast: () => setCommitmentToast(''),
       }}
     >
       {children}

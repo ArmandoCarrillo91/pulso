@@ -40,36 +40,38 @@ export interface Transaction {
   source: 'manual' | 'automated' | 'api' | 'import'
 }
 
-export interface Plan {
-  id: string
-  user_id: string
-  name: string
-  amount_per_fortnight: number
-  goal_amount: number
-  priority: number
-  start_date: string
-  target_date: string | null
-  current_amount: number
-  created_at?: string
-}
-
-export interface FixedExpense {
+export interface Commitment {
   id: string
   user_id: string
   name: string
   amount: number
-  day_of_month: number
-  category_id: string | null
-  category?: Category
-  next_payment_date: string | null
+  frequency: 'fortnight' | 'monthly' | 'once'
+  end_type: 'indefinite' | 'date' | 'installments' | 'goal'
   end_date: string | null
-  last_paid_date: string | null
-  start_date: string | null
   total_installments: number | null
   paid_installments: number
-  expense_type: 'fixed' | 'msi'
+  goal_amount: number | null
+  current_amount: number
+  start_date: string
+  day_of_month: number | null
+  category_id: string | null
+  category?: Category
+  last_paid_date: string | null
   completed_at: string | null
+  priority: number
   total_amount: number | null
+  created_at: string
+}
+
+export type CommitmentType = 'fixed' | 'msi' | 'savings_goal' | 'seasonal' | 'recurring_savings' | 'one_time'
+
+export function getCommitmentType(c: Commitment): CommitmentType {
+  if (c.frequency === 'monthly' && c.end_type === 'indefinite') return 'fixed'
+  if (c.frequency === 'monthly' && c.end_type === 'installments') return 'msi'
+  if (c.frequency === 'fortnight' && c.end_type === 'goal') return 'savings_goal'
+  if (c.frequency === 'fortnight' && c.end_type === 'date') return 'seasonal'
+  if (c.frequency === 'fortnight' && c.end_type === 'indefinite') return 'recurring_savings'
+  return 'one_time'
 }
 
 export interface User {
