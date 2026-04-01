@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getLocalDateString } from '@/lib/date'
-import { fixedExpensesInPeriod } from '@/lib/calculations'
 import { detectPlatform } from '@/lib/utils'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePlans } from '@/hooks/usePlans'
@@ -391,9 +390,21 @@ export default function HomePage() {
     setTimeout(() => todaySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
-  const fixedThisPeriod = fixedExpensesInPeriod(expenses, new Date(), nextPayday)
+  // ─── Income-based period ───
+  // Find most recent income (quincena/salary) — defines the period
+  const lastQuincenaIncome = useMemo(() => {
+    return transactions.find((t) => t.type === 'income') ?? null
+  }, [transactions])
 
-  // MSI per-fortnight deduction: active MSIs contribute amount/2 per fortnight
+  const hasIncome = !!lastQuincenaIncome
+  const periodStartStr = lastQuincenaIncome?.date ?? null
+
+  // Fixed expenses per fortnight = half monthly amount for each active fixed expense
+  const fixedPerFortnight = expenses
+    .filter((e) => e.expense_type !== 'msi')
+    .reduce((sum, e) => sum + e.amount / 2, 0)
+
+  // MSI per fortnight = monthly amount (one payment per month, ~one per fortnight)
   const msiPerFortnight = expenses
     .filter((e) => {
       if (e.expense_type !== 'msi') return false
@@ -404,70 +415,60 @@ export default function HomePage() {
       if (e.end_date && todayStr > e.end_date) return false
       return true
     })
-    .reduce((sum, e) => sum + e.amount / 2, 0)
+    .reduce((sum, e) => sum + e.amount, 0)
+
+  // Period calculations (only meaningful when income exists)
+  const ingresado = lastQuincenaIncome?.amount ?? 0
+  const committedThisFortnight = totalSavingsPerFortnight + fixedPerFortnight + msiPerFortnight
+
+  const gastado = periodStartStr
+    ? transactions
+        .filter((t) => t.type === 'expense' && t.date >= periodStartStr)
+        .reduce((sum, t) => sum + t.amount, 0)
+    : 0
+
+  const freeThisFortnight = ingresado - gastado - committedThisFortnight
 
   const dailyBudget =
-    daysRemaining > 0
-      ? (currentBalance - totalSavingsPerFortnight - fixedThisPeriod - msiPerFortnight) / daysRemaining
+    hasIncome && daysRemaining > 0
+      ? freeThisFortnight / daysRemaining
       : 0
 
-  // Carryover: balance from before current fortnight's income
-  const lastQuincena = transactions.find(
-    (t) => t.type === 'income' && t.category?.slug?.startsWith('quincena')
-  )
-  const carryover = lastQuincena
-    ? lastQuincena.balance_before
-    : null
-
-  // Burn rate
-  const prevPaydayStr = getLocalDateString(previousPayday)
-  const spentThisPeriod = transactions
-    .filter((t) => t.type === 'expense' && t.date >= prevPaydayStr)
-    .reduce((sum, t) => sum + t.amount, 0)
-  const totalAvailable = currentBalance + spentThisPeriod
-  const burnPct = totalAvailable > 0 ? spentThisPeriod / totalAvailable : 0
+  // Burn rate: gastado / ingresado (only expenses since period start)
+  const spentThisPeriod = gastado
+  const burnPct = ingresado > 0 ? spentThisPeriod / ingresado : 0
   const timePct = progress
 
   let burnColor = '#f59e0b' // amber — on pace
   if (burnPct < timePct - 0.1) burnColor = '#16a34a' // green — ahead
   else if (burnPct > timePct + 0.1) burnColor = '#dc2626' // red — overspending
 
-  // ─── Three-line fortnight snapshot ───
-  const incomeThisFortnight = transactions
-    .filter((t) => t.type === 'income' && t.date >= prevPaydayStr)
-    .reduce((sum, t) => sum + t.amount, 0)
-
-  const committedThisFortnight = totalSavingsPerFortnight + fixedThisPeriod + msiPerFortnight
-
-  const freeThisFortnight = incomeThisFortnight - committedThisFortnight
-
   // ─── Historical average daily spend ───
   const historicalAvgDaily = useMemo(() => {
-    // Get all expenses BEFORE the current fortnight's start (previousPayday)
+    if (!periodStartStr) return null
     const prevExpenses = transactions.filter(
-      (t) => t.type === 'expense' && t.date < prevPaydayStr
+      (t) => t.type === 'expense' && t.date < periodStartStr
     )
     if (prevExpenses.length === 0) return null
 
     const totalPrevExpenses = prevExpenses.reduce((sum, t) => sum + t.amount, 0)
 
-    // Find the earliest expense date to calculate total days
     const earliestDate = prevExpenses.reduce(
       (min, t) => (t.date < min ? t.date : min),
       prevExpenses[0].date
     )
     const earliest = new Date(earliestDate + 'T12:00:00')
-    const periodEnd = new Date(prevPaydayStr + 'T12:00:00')
+    const periodEnd = new Date(periodStartStr + 'T12:00:00')
     const totalDaysHistory = Math.max(
       Math.ceil((periodEnd.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24)),
       1
     )
 
     return totalPrevExpenses / totalDaysHistory
-  }, [transactions, prevPaydayStr])
+  }, [transactions, periodStartStr])
 
   // ─── End of fortnight mode ───
-  const isEndOfFortnight = daysRemaining <= 3
+  const isEndOfFortnight = hasIncome && daysRemaining <= 3
 
   const today = new Date()
   const dateStr = today.toLocaleDateString('es-MX', {
@@ -510,6 +511,17 @@ export default function HomePage() {
           <HeroSkeleton />
           <BurnBarSkeleton />
         </>
+      ) : !hasIncome ? (
+        /* Empty state — no income registered yet */
+        <div className="text-center py-8 mb-4">
+          <p className="text-lg font-bold mb-2">Registra tu quincena</p>
+          <p className="text-sm text-[var(--text-muted)] mb-6">
+            Anota tu ingreso para activar el cálculo
+          </p>
+          <Button onClick={() => setModalOpen(true)}>
+            + Anotar ingreso
+          </Button>
+        </div>
       ) : (
         <>
           <div className="text-center mb-4">
@@ -539,7 +551,7 @@ export default function HomePage() {
           >
             <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
               <span>Ingresado</span>
-              <span>{formatMoney(incomeThisFortnight)}</span>
+              <span>{formatMoney(ingresado)}</span>
             </div>
             <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1.5">
               <span>Comprometido</span>
@@ -574,7 +586,7 @@ export default function HomePage() {
                 Gastado {formatMoney(spentThisPeriod)}
               </span>
               <span className="text-[11px] text-[var(--text-muted)]">
-                Disponible {formatMoney(currentBalance)}
+                Libre {formatMoney(freeThisFortnight)}
               </span>
             </div>
             {historicalAvgDaily !== null && (
