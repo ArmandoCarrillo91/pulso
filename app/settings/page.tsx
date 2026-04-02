@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { useCategories } from '@/hooks/useCategories'
+import { useBudgets } from '@/hooks/useBudgets'
 
 export default function SettingsPage() {
   const { categories } = useCategories()
+  const { budgets } = useBudgets()
   const supabase = createClient()
   const router = useRouter()
 
@@ -52,6 +54,24 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-2">
+        {/* Budgets */}
+        <Link
+          href="/budgets"
+          className="flex items-center gap-3 p-4 rounded-card bg-[var(--bg-card)]"
+          style={{ border: '0.5px solid var(--pill-border)' }}
+        >
+          <span className="text-xl">💰</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold">Sobres</p>
+            <p className="text-xs text-[var(--text-muted)]">
+              {budgets.length} {budgets.length === 1 ? 'sobre activo' : 'sobres activos'}
+            </p>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </Link>
+
         {/* Categories */}
         <Link
           href="/settings/categories"

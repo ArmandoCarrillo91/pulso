@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react'
 import { createClient } from '@/lib/supabase'
-import type { Transaction, Commitment, Category } from '@/types'
+import type { Transaction, Commitment, Category, Budget } from '@/types'
 
 interface AppContextValue {
   // Categories
@@ -55,6 +55,13 @@ interface AppContextValue {
   deleteCommitment: (id: string) => Promise<void>
   commitmentToast: string
   clearCommitmentToast: () => void
+
+  // Budgets
+  budgets: Budget[]
+  budgetsLoading: boolean
+  createBudget: (b: Omit<Budget, 'id' | 'user_id' | 'category' | 'created_at'>) => Promise<Budget | null>
+  updateBudget: (id: string, updates: Partial<Budget>) => Promise<void>
+  deleteBudget: (id: string) => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -370,6 +377,84 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [supabase]
   )
 
+  // ─── Budgets ───
+  const [budgets, setBudgets] = useState<Budget[]>([])
+  const [budgetsLoading, setBudgetsLoading] = useState(true)
+
+  const fetchBudgets = useCallback(async () => {
+    const userId = await getUserId()
+    if (!userId) return
+
+    const { data, error } = await supabase
+      .from('budgets')
+      .select('*, category:categories(id, slug, label, emoji)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching budgets:', JSON.stringify(error))
+    } else if (data) {
+      setBudgets(data as Budget[])
+    }
+    setBudgetsLoading(false)
+  }, [supabase, getUserId])
+
+  useEffect(() => {
+    fetchBudgets()
+  }, [fetchBudgets])
+
+  const createBudget = useCallback(
+    async (budget: Omit<Budget, 'id' | 'user_id' | 'category' | 'created_at'>) => {
+      const userId = await getUserId()
+      if (!userId) return null
+
+      const tempId = `temp-${Date.now()}`
+      const cat = categories.find((c) => c.id === budget.category_id)
+      const optimistic = { ...budget, id: tempId, user_id: userId, created_at: new Date().toISOString(), category: cat || undefined } as Budget
+      setBudgets((prev) => [...prev, optimistic])
+
+      const { category: _, ...insertData } = budget as Budget & { category?: unknown }
+      const { data, error } = await supabase
+        .from('budgets')
+        .insert({ ...insertData, user_id: userId })
+        .select('*, category:categories(id, slug, label, emoji)')
+        .single()
+
+      if (error) {
+        setBudgets((prev) => prev.filter((b) => b.id !== tempId))
+        console.error('Error creating budget:', JSON.stringify(error))
+        return null
+      }
+
+      setBudgets((prev) => prev.map((b) => (b.id === tempId ? (data as Budget) : b)))
+      return data as Budget
+    },
+    [supabase, getUserId, categories]
+  )
+
+  const updateBudget = useCallback(
+    async (id: string, updates: Partial<Budget>) => {
+      setBudgets((prev) => prev.map((b) => (b.id === id ? { ...b, ...updates } : b)))
+      const { category: _, ...dbUpdates } = updates as Budget & { category?: unknown }
+      const { error } = await supabase.from('budgets').update(dbUpdates).eq('id', id)
+      if (error) await fetchBudgets()
+    },
+    [supabase, fetchBudgets]
+  )
+
+  const deleteBudget = useCallback(
+    async (id: string) => {
+      let removed: Budget | undefined
+      setBudgets((prev) => {
+        removed = prev.find((b) => b.id === id)
+        return prev.filter((b) => b.id !== id)
+      })
+      const { error } = await supabase.from('budgets').delete().eq('id', id)
+      if (error && removed) setBudgets((prev) => [...prev, removed!])
+    },
+    [supabase]
+  )
+
   return (
     <AppContext.Provider
       value={{
@@ -383,6 +468,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         commitments, commitmentsLoading,
         createCommitment, updateCommitment, deleteCommitment,
         commitmentToast, clearCommitmentToast: () => setCommitmentToast(''),
+
+        budgets, budgetsLoading,
+        createBudget, updateBudget, deleteBudget,
       }}
     >
       {children}

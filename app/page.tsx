@@ -1,11 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { getLocalDateString } from '@/lib/date'
 import { detectPlatform } from '@/lib/utils'
 import { useTransactions } from '@/hooks/useTransactions'
 import { useCommitments } from '@/hooks/useCommitments'
+import { useBudgets } from '@/hooks/useBudgets'
 import { usePayday } from '@/hooks/usePayday'
 import TransactionModal from '@/components/modals/TransactionModal'
 import EditTransactionModal from '@/components/modals/EditTransactionModal'
@@ -112,6 +114,7 @@ export default function HomePage() {
     daysSinceLastIncome, toastMsg, clearToast,
   } = useTransactions()
   const { commitments, updateCommitment } = useCommitments()
+  const { budgets } = useBudgets()
 
   const lastIncomeDate = useMemo(() => {
     const income = transactions.find((t) => t.type === 'income')
@@ -474,6 +477,52 @@ export default function HomePage() {
               <span className="text-[11px] text-[var(--text-muted)]">Disponible {formatMoney(freeThisFortnight)}</span>
             </div>
           </div>
+
+          {/* Sobre status — only show > 70% spent, max 3 */}
+          {(() => {
+            if (!periodStartStr || budgets.length === 0) return null
+            const sobreStatus = budgets
+              .map((b) => {
+                const spent = transactions
+                  .filter((t) => t.type === 'expense' && t.date >= periodStartStr! && t.category_id === b.category_id)
+                  .reduce((sum, t) => sum + t.amount, 0)
+                const limit = b.frequency === 'monthly' ? b.amount / 2 : b.amount
+                const pct = limit > 0 ? spent / limit : 0
+                const remaining = Math.max(limit - spent, 0)
+                return { ...b, spent, pct, remaining }
+              })
+              .filter((s) => s.pct > 0.7)
+              .sort((a, b) => b.pct - a.pct)
+              .slice(0, 3)
+
+            if (sobreStatus.length === 0) return null
+
+            return (
+              <div className="mb-2 space-y-1">
+                {sobreStatus.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2 text-[11px]">
+                    <span>{s.category?.emoji || '📦'}</span>
+                    <span className="text-[var(--text-muted)] flex-1">{s.category?.label}</span>
+                    <div className="w-16 h-1 rounded-full bg-[var(--bg-secondary)] overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(s.pct, 1) * 100}%`,
+                          backgroundColor: s.pct > 0.9 ? '#dc2626' : '#f59e0b',
+                        }}
+                      />
+                    </div>
+                    <span className={`font-medium ${s.pct > 0.9 ? 'text-negative/70' : 'text-amber-500/70'}`}>
+                      ${Math.round(s.remaining)}
+                    </span>
+                  </div>
+                ))}
+                <Link href="/budgets" className="text-[10px] text-positive font-medium">
+                  Ver todos →
+                </Link>
+              </div>
+            )
+          })()}
         </>
       )}
       </div>

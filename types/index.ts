@@ -75,6 +75,16 @@ export function getCommitmentType(c: Commitment): CommitmentType {
   return 'one_time'
 }
 
+export interface Budget {
+  id: string
+  user_id: string
+  category_id: string
+  category?: Category
+  amount: number
+  frequency: 'fortnight' | 'monthly'
+  created_at: string
+}
+
 export interface User {
   id: string
   email: string

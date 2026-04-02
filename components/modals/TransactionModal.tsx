@@ -1,10 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getLocalDateString } from '@/lib/date'
 import { detectPlatform } from '@/lib/utils'
 import { useCategories } from '@/hooks/useCategories'
+import { useBudgets } from '@/hooks/useBudgets'
+import { useTransactions } from '@/hooks/useTransactions'
 import Button from '@/components/ui/Button'
 import StarRating from '@/components/ui/StarRating'
 import type { Transaction, Category } from '@/types'
@@ -57,6 +59,26 @@ export default function TransactionModal({
     expenseCategories,
     createCategory,
   } = useCategories()
+  const { budgets } = useBudgets()
+  const { transactions: allTx } = useTransactions()
+
+  // Compute budget remaining per category
+  const budgetRemaining = useMemo(() => {
+    const periodStart = allTx.find((t) => t.type === 'income')?.date
+    if (!periodStart) return new Map<string, { remaining: number; pct: number }>()
+
+    const map = new Map<string, { remaining: number; pct: number }>()
+    for (const b of budgets) {
+      const spent = allTx
+        .filter((t) => t.type === 'expense' && t.date >= periodStart && t.category_id === b.category_id)
+        .reduce((sum, t) => sum + t.amount, 0)
+      const limit = b.frequency === 'monthly' ? b.amount / 2 : b.amount
+      const remaining = Math.max(limit - spent, 0)
+      const pct = limit > 0 ? remaining / limit : 1
+      map.set(b.category_id, { remaining, pct })
+    }
+    return map
+  }, [budgets, allTx])
 
   useEffect(() => {
     if (isOpen) {
@@ -296,16 +318,28 @@ export default function TransactionModal({
               <div className="mb-4">
                 {/* Main grid: top 8 (or all if onboarding) */}
                 <div className="grid grid-cols-4 gap-3">
-                  {mainGrid.map((cat) => (
-                    <button
-                      key={cat.id}
-                      className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
-                      onClick={() => handleCategorySelect(cat)}
-                    >
-                      <span className="text-2xl">{cat.emoji}</span>
-                      <span className="text-[11px] font-medium">{cat.label}</span>
-                    </button>
-                  ))}
+                  {mainGrid.map((cat) => {
+                    const bInfo = budgetRemaining.get(cat.id)
+                    return (
+                      <button
+                        key={cat.id}
+                        className="flex flex-col items-center gap-1 p-3 rounded-card transition-all bg-[var(--bg-secondary)] border-2 border-transparent active:border-positive active:bg-positive/10"
+                        onClick={() => handleCategorySelect(cat)}
+                      >
+                        <span className="text-2xl">{cat.emoji}</span>
+                        <span className="text-[11px] font-medium">{cat.label}</span>
+                        {bInfo && (
+                          <span className={`text-[9px] ${
+                            bInfo.pct > 0.3 ? 'text-positive/70'
+                            : bInfo.pct > 0.1 ? 'text-amber-500/70'
+                            : 'text-negative/70'
+                          }`}>
+                            ${Math.round(bInfo.remaining)}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
                   {/* Show + Nueva inline if grid has room (<8) and no overflow */}
                   {mainGrid.length < 8 && !hasOverflow && (
                     <button
@@ -458,6 +492,23 @@ export default function TransactionModal({
                 autoFocus
               />
             </div>
+            {/* Sobre warning */}
+            {(() => {
+              if (!categoryId || type !== 'expense') return null
+              const bInfo = budgetRemaining.get(categoryId)
+              if (!bInfo) return null
+              const parsed = parseFloat(amount) || 0
+              if (parsed <= 0) return null
+              const afterSpend = bInfo.remaining - parsed
+              const catLabel = allCategories.find((c) => c.id === categoryId)?.label || ''
+              if (afterSpend < 0) {
+                return <p className="text-xs text-amber-500 text-center mb-2">Este gasto supera tu sobre de {catLabel} por ${Math.abs(Math.round(afterSpend)).toLocaleString()}</p>
+              }
+              if (afterSpend === 0) {
+                return <p className="text-xs text-amber-500 text-center mb-2">Este gasto deja tu sobre de {catLabel} en $0</p>
+              }
+              return null
+            })()}
             <input
               type="text"
               value={note}
