@@ -35,6 +35,7 @@ interface LogEntry {
   badge?: string
   badgeColor?: 'muted' | 'amber' | 'positive'
   projected: boolean
+  commitmentKind?: 'savings' | 'msi' | 'fixed'
   transaction?: Transaction
   commitment?: Commitment
 }
@@ -237,77 +238,93 @@ export default function HomePage() {
         transaction: t,
       }))
 
-    // B) Projected commitments
+    // B) Projected commitments — three visual types:
+    //   savings (automatic, muted) | msi (amber, confirm) | fixed (gray, confirm)
     const commitmentEntries: LogEntry[] = commitments.flatMap((c): LogEntry[] => {
       if (c.completed_at) return []
 
       const cType = getCommitmentType(c)
 
-      if (c.frequency === 'monthly') {
-        // Monthly: show ONE entry per month on day_of_month
-        const day = Math.min(c.day_of_month || 1, lastDay)
-        const dateStr = `${ay}-${pad2(am + 1)}-${pad2(day)}`
+      // ── TYPE 1: Savings (fortnight, automatic transfers) ──
+      if (cType === 'savings_goal' || cType === 'recurring_savings' || cType === 'seasonal') {
+        const fortnightDates = [
+          `${ay}-${pad2(am + 1)}-15`,
+          `${ay}-${pad2(am + 1)}-${pad2(lastDay)}`,
+        ]
 
-        // Only show if date >= today (don't show past projected entries)
-        if (dateStr < todayStr) return []
+        const nextDate = fortnightDates.find((d) => {
+          if (d < todayStr) return false
+          if (d < c.start_date) return false
+          if (c.end_date && d > c.end_date) return false
+          return true
+        })
 
-        // MSI bounds
-        if (cType === 'msi') {
-          if (c.start_date && dateStr < c.start_date.slice(0, 7) + '-01') return []
-          if (c.end_date && dateStr > c.end_date) return []
-        }
+        if (!nextDate) return []
 
-        // Already paid this month → skip
-        if (c.last_paid_date && isInMonth(c.last_paid_date, am, ay)) return []
+        const projectedAmount = (cType === 'savings_goal' && c.goal_amount && c.amount > c.goal_amount)
+          ? c.goal_amount : c.amount
 
-        const isMsi = cType === 'msi'
-        const badge = isMsi ? 'MSI' : 'mensual'
+        return [{
+          id: `c-${c.id}-${am}`,
+          kind: 'commitment' as const,
+          date: nextDate,
+          label: c.name,
+          subtitle: cType === 'savings_goal' ? 'meta' : 'automático',
+          amount: projectedAmount,
+          type: 'expense' as const,
+          commitmentKind: 'savings',
+          projected: true,
+          commitment: c,
+        }]
+      }
 
+      // ── Monthly types (MSI & Fixed) ──
+      const day = Math.min(c.day_of_month || 1, lastDay)
+      const dateStr = `${ay}-${pad2(am + 1)}-${pad2(day)}`
+
+      if (dateStr < todayStr) return []
+
+      // MSI bounds
+      if (cType === 'msi') {
+        if (c.start_date && dateStr < c.start_date.slice(0, 7) + '-01') return []
+        if (c.end_date && dateStr > c.end_date) return []
+      }
+
+      // Already paid this month → skip
+      if (c.last_paid_date && isInMonth(c.last_paid_date, am, ay)) return []
+
+      // ── TYPE 2: MSI ──
+      if (cType === 'msi') {
         return [{
           id: `c-${c.id}`,
           kind: 'commitment' as const,
           date: dateStr,
           label: c.name,
           emoji: c.category?.emoji,
-          subtitle: isMsi ? `${c.paid_installments || 0}/${c.total_installments || 0} pagos` : `día ${c.day_of_month || 1}`,
+          subtitle: `${c.paid_installments || 0}/${c.total_installments || 0} pagos`,
           amount: c.amount,
           type: 'expense' as const,
-          badge,
-          badgeColor: (isMsi ? 'amber' : 'muted') as 'amber' | 'muted',
+          badge: 'MSI',
+          badgeColor: 'amber' as const,
+          commitmentKind: 'msi',
           projected: true,
           commitment: c,
         }]
       }
 
-      // Fortnight: show only the NEXT upcoming payment date (not all future)
-      const fortnightDates = [
-        `${ay}-${pad2(am + 1)}-15`,
-        `${ay}-${pad2(am + 1)}-${pad2(lastDay)}`,
-      ]
-
-      const nextDate = fortnightDates.find((d) => {
-        if (d < todayStr) return false
-        if (d < c.start_date) return false
-        if (c.end_date && d > c.end_date) return false
-        return true
-      })
-
-      if (!nextDate) return []
-
-      // Use the per-fortnight contribution, not goal amount
-      const projectedAmount = (cType === 'savings_goal' && c.goal_amount && c.amount > c.goal_amount)
-        ? c.goal_amount : c.amount
-
+      // ── TYPE 3: Fixed expenses ──
       return [{
-        id: `c-${c.id}-${am}`,
+        id: `c-${c.id}`,
         kind: 'commitment' as const,
-        date: nextDate,
+        date: dateStr,
         label: c.name,
-        subtitle: cType === 'savings_goal' ? 'meta' : 'ahorro',
-        amount: projectedAmount,
+        emoji: c.category?.emoji,
+        subtitle: `día ${c.day_of_month || 1}`,
+        amount: c.amount,
         type: 'expense' as const,
-        badge: 'ahorro',
-        badgeColor: 'positive' as const,
+        badge: 'fijo',
+        badgeColor: 'muted' as const,
+        commitmentKind: 'fixed',
         projected: true,
         commitment: c,
       }]
@@ -580,11 +597,14 @@ export default function HomePage() {
                 <div className="space-y-1.5">
                   {section.entries.map((entry) => {
                     const isTransaction = entry.kind === 'transaction'
-                    const isCommitmentUnpaid = entry.kind === 'commitment' && entry.projected && entry.commitment?.frequency === 'monthly'
+                    const isSavings = entry.commitmentKind === 'savings'
+                    const needsConfirm = entry.commitmentKind === 'msi' || entry.commitmentKind === 'fixed'
 
                     const rowContent = (
-                      <div className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]" style={{ opacity: entry.projected ? 0.5 : 1 }}>
-                        {entry.projected ? (
+                      <div className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]" style={{ opacity: isSavings ? 0.5 : entry.projected && !needsConfirm ? 0.5 : 1 }}>
+                        {isSavings ? (
+                          <span className="text-sm shrink-0">🏦</span>
+                        ) : entry.projected ? (
                           <span className="w-2 h-2 rounded-full shrink-0" style={{ border: '1.5px dashed var(--text-muted)' }} />
                         ) : (
                           <span className={`w-2 h-2 rounded-full shrink-0 ${entry.type === 'income' ? 'bg-positive' : 'bg-negative'}`} />
@@ -601,11 +621,14 @@ export default function HomePage() {
                                 : 'bg-[var(--border-color)] text-[var(--text-muted)]'
                               }`}>{entry.badge}</span>
                             )}
+                            {isSavings && (
+                              <span className="text-[9px] text-[var(--text-muted)] opacity-70">automático</span>
+                            )}
                           </div>
                           {entry.subtitle && <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{entry.subtitle}</p>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          {isCommitmentUnpaid && (
+                          {needsConfirm && (
                             <button
                               className="text-[10px] font-semibold text-positive px-2 py-1 rounded-btn"
                               style={{ border: '0.5px solid rgba(22, 163, 74, 0.3)' }}
