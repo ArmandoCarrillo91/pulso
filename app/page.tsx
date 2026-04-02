@@ -389,17 +389,20 @@ export default function HomePage() {
   const ingresado = lastQuincenaIncome?.amount ?? 0
   const committedThisFortnight = fortnightDeduction
 
-  const gastado = periodStartStr
-    ? transactions.filter((t) => t.type === 'expense' && t.date >= periodStartStr).reduce((sum, t) => sum + t.amount, 0)
-    : 0
+  const periodExpenses = periodStartStr
+    ? transactions.filter((t) => t.type === 'expense' && t.date >= periodStartStr)
+    : []
+  const gastado = periodExpenses.reduce((sum, t) => sum + t.amount, 0)
+  const gastadoExtra = periodExpenses.filter((t) => t.is_extraordinary).reduce((sum, t) => sum + t.amount, 0)
 
   const freeThisFortnight = ingresado - gastado - committedThisFortnight
 
   const dailyBudget = hasIncome && daysRemaining > 0 ? freeThisFortnight / daysRemaining : 0
 
-  const spentThisPeriod = gastado
-  const totalSpendable = freeThisFortnight + gastado
-  const burnPct = totalSpendable > 0 ? spentThisPeriod / totalSpendable : 0
+  // Burn rate excludes extraordinary expenses
+  const ordinarySpent = gastado - gastadoExtra
+  const ordinaryPool = ingresado - committedThisFortnight - gastadoExtra
+  const burnPct = ordinaryPool > 0 ? ordinarySpent / ordinaryPool : 0
   const timePct = progress
 
   let burnColor = '#f59e0b'
@@ -473,7 +476,7 @@ export default function HomePage() {
               <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(burnPct, 1) * 100}%`, backgroundColor: burnColor }} />
             </div>
             <div className="flex justify-between mt-1.5">
-              <span className="text-[11px] text-[var(--text-muted)]">Gastado {formatMoney(spentThisPeriod)}</span>
+              <span className="text-[11px] text-[var(--text-muted)]">Gastado {formatMoney(gastado)}</span>
               <span className="text-[11px] text-[var(--text-muted)]">Disponible {formatMoney(freeThisFortnight)}</span>
             </div>
           </div>
@@ -588,6 +591,7 @@ export default function HomePage() {
                         )}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
+                            {entry.transaction?.is_extraordinary && <span className="text-[11px] opacity-40">⚡</span>}
                             {entry.emoji && <span className="text-sm">{entry.emoji}</span>}
                             <p className="text-sm font-medium truncate">{entry.label}</p>
                             {entry.badge && (

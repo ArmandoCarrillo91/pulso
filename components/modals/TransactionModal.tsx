@@ -41,6 +41,7 @@ export default function TransactionModal({
   const [saving, setSaving] = useState(false)
   const [categoryChanges, setCategoryChanges] = useState(0)
   const [date, setDate] = useState('')
+  const [isExtraordinary, setIsExtraordinary] = useState(false)
 
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
 
@@ -94,6 +95,7 @@ export default function TransactionModal({
       prevCategoryRef.current = null
       savedIdRef.current = null
       setDate(getLocalDateString())
+      setIsExtraordinary(false)
       setShowCustomForm(false)
       setShowMore(false)
       setCustomEmoji('')
@@ -197,6 +199,7 @@ export default function TransactionModal({
       days_since_last_income:
         type === 'income' ? 0 : daysSinceLastIncome,
       days_until_next_payday: daysUntilNextPayday,
+      is_extraordinary: false,
     }
 
     const result = await onSave(transaction)
@@ -210,14 +213,19 @@ export default function TransactionModal({
   }
 
   const handleRatingDone = async () => {
-    if (savedIdRef.current && rating > 0) {
-      const supabase = createClient()
-      const { error } = await supabase
-        .from('transactions')
-        .update({ rating })
-        .eq('id', savedIdRef.current)
-      if (error) {
-        console.error('Error updating rating:', JSON.stringify(error))
+    if (savedIdRef.current) {
+      const updates: Record<string, unknown> = {}
+      if (rating > 0) updates.rating = rating
+      if (isExtraordinary) updates.is_extraordinary = true
+      if (Object.keys(updates).length > 0) {
+        const supabase = createClient()
+        const { error } = await supabase
+          .from('transactions')
+          .update(updates)
+          .eq('id', savedIdRef.current)
+        if (error) {
+          console.error('Error updating rating:', JSON.stringify(error))
+        }
       }
     }
     onClose()
@@ -557,6 +565,20 @@ export default function TransactionModal({
                 : 'Califica qué tan satisfecho te sientes'}
             </p>
             <StarRating value={rating} onChange={setRating} />
+            {type === 'expense' && (
+              <button
+                className="flex items-center gap-2 mt-5 mx-auto px-3 py-2 rounded-btn transition-colors"
+                onClick={() => setIsExtraordinary(!isExtraordinary)}
+              >
+                <span className={`w-8 h-[18px] rounded-full transition-colors relative ${isExtraordinary ? 'bg-positive' : 'bg-[var(--bg-secondary)]'}`}>
+                  <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-transform ${isExtraordinary ? 'left-[16px]' : 'left-[2px]'}`} />
+                </span>
+                <span className="text-xs text-[var(--text-muted)]">
+                  Gasto extraordinario
+                  <span className="block text-[10px] text-[var(--text-muted)] opacity-60">Viaje, emergencia, reparación — no se repite</span>
+                </span>
+              </button>
+            )}
             <div className="mt-6">
               <Button fullWidth onClick={handleRatingDone}>
                 Listo
