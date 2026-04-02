@@ -185,6 +185,8 @@ export default function CompromisosPage() {
       completed_at: null,
       priority: commitments.length,
       total_amount: totalAmount,
+      initial_balance: 0,
+      balance_start_date: null,
     })
 
     setWizardSaving(false)

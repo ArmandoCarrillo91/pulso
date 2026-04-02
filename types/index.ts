@@ -62,6 +62,8 @@ export interface Commitment {
   completed_at: string | null
   priority: number
   total_amount: number | null
+  initial_balance: number
+  balance_start_date: string | null
   created_at: string
 }
 

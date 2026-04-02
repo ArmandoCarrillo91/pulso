@@ -54,3 +54,44 @@ export function getNextOccurrence(month: number): Date {
   if (target <= today) target.setFullYear(year + 1)
   return target
 }
+
+/**
+ * Count paydays (15th and last business day of each month) between two dates inclusive.
+ * Last business day: last day of month, shifted to Friday if it falls on Sat/Sun.
+ */
+export function countFortnightsBetween(startDate: string, endDate: string): number {
+  const start = new Date(startDate + 'T12:00:00')
+  const end = new Date(endDate + 'T12:00:00')
+  if (end < start) return 0
+
+  let count = 0
+  let month = start.getMonth()
+  let year = start.getFullYear()
+
+  // Walk month by month, checking both paydays
+  const endTime = end.getTime()
+  const startTime = start.getTime()
+
+  // Go up to 2 years beyond end to be safe, but break early
+  for (let i = 0; i < 120; i++) {
+    // Payday 1: 15th of the month
+    const fifteenth = new Date(year, month, 15)
+    const fifteenthTime = fifteenth.getTime()
+    if (fifteenthTime >= startTime && fifteenthTime <= endTime) count++
+    if (fifteenthTime > endTime) break
+
+    // Payday 2: last business day of the month
+    const lastDay = new Date(year, month + 1, 0) // last calendar day
+    const dow = lastDay.getDay()
+    if (dow === 6) lastDay.setDate(lastDay.getDate() - 1) // Sat → Fri
+    else if (dow === 0) lastDay.setDate(lastDay.getDate() - 2) // Sun → Fri
+    const lastBizTime = lastDay.getTime()
+    if (lastBizTime >= startTime && lastBizTime <= endTime) count++
+
+    // Advance month
+    month++
+    if (month > 11) { month = 0; year++ }
+  }
+
+  return count
+}

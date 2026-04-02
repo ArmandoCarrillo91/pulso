@@ -6,10 +6,16 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { useCategories } from '@/hooks/useCategories'
 import { useBudgets } from '@/hooks/useBudgets'
+import { useCommitments } from '@/hooks/useCommitments'
 
 export default function SettingsPage() {
   const { categories } = useCategories()
   const { budgets } = useBudgets()
+  const { commitments } = useCommitments()
+
+  const accountCount = commitments.filter(
+    (c) => c.frequency === 'fortnight' && (c.end_type === 'goal' || c.end_type === 'indefinite') && (c.initial_balance > 0 || c.balance_start_date)
+  ).length
   const supabase = createClient()
   const router = useRouter()
 
@@ -54,6 +60,24 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-2">
+        {/* Mis cuentas */}
+        <Link
+          href="/settings/cuentas"
+          className="flex items-center gap-3 p-4 rounded-card bg-[var(--bg-card)]"
+          style={{ border: '0.5px solid var(--pill-border)' }}
+        >
+          <span className="text-xl">🏦</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold">Mis cuentas</p>
+            <p className="text-xs text-[var(--text-muted)]">
+              {accountCount} {accountCount === 1 ? 'cuenta' : 'cuentas'}
+            </p>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </Link>
+
         {/* Budgets */}
         <Link
           href="/budgets"
