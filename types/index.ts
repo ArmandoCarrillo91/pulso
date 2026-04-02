@@ -38,6 +38,7 @@ export interface Transaction {
   days_since_last_income?: number | null
   days_until_next_payday?: number
   source: 'manual' | 'automated' | 'api' | 'import'
+  is_commitment_payment?: boolean
 }
 
 export interface Commitment {

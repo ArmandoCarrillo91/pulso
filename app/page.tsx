@@ -156,9 +156,12 @@ export default function HomePage() {
     const dateObj = new Date(selectedDate + 'T12:00:00')
     const nowTime = new Date()
 
+    // Use commitment's category, or null (user can assign later)
+    const txCategoryId = confirmingCommitment.category_id
+
     const transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'> = {
       type: 'expense',
-      category_id: confirmingCommitment.category_id,
+      category_id: txCategoryId,
       amount: confirmingCommitment.amount,
       note: confirmNote.trim() || `Pago: ${confirmingCommitment.name}`,
       rating: null,
@@ -176,6 +179,7 @@ export default function HomePage() {
       balance_after: currentBalance - confirmingCommitment.amount,
       days_since_last_income: daysSinceLastIncome,
       days_until_next_payday: daysRemaining,
+      is_commitment_payment: true,
     }
 
     await createTransaction(transaction)
@@ -237,9 +241,12 @@ export default function HomePage() {
       const cType = getCommitmentType(c)
 
       if (c.frequency === 'monthly') {
-        // Monthly: show on day_of_month each month
+        // Monthly: show ONE entry per month on day_of_month
         const day = Math.min(c.day_of_month || 1, lastDay)
         const dateStr = `${ay}-${pad2(am + 1)}-${pad2(day)}`
+
+        // Only show if date >= today (don't show past projected entries)
+        if (dateStr < todayStr) return []
 
         // MSI bounds
         if (cType === 'msi') {
@@ -247,12 +254,11 @@ export default function HomePage() {
           if (c.end_date && dateStr > c.end_date) return []
         }
 
-        // Already paid this month
+        // Already paid this month → skip
         if (c.last_paid_date && isInMonth(c.last_paid_date, am, ay)) return []
 
-        const badge = cType === 'msi'
-          ? `${c.paid_installments || 0}/${c.total_installments || 0}`
-          : 'mensual'
+        const isMsi = cType === 'msi'
+        const badge = isMsi ? 'MSI' : 'mensual'
 
         return [{
           id: `c-${c.id}`,
@@ -260,41 +266,44 @@ export default function HomePage() {
           date: dateStr,
           label: c.name,
           emoji: c.category?.emoji,
-          subtitle: cType === 'msi' ? 'MSI' : `día ${c.day_of_month || 1}`,
+          subtitle: isMsi ? `${c.paid_installments || 0}/${c.total_installments || 0} pagos` : `día ${c.day_of_month || 1}`,
           amount: c.amount,
           type: 'expense' as const,
           badge,
-          badgeColor: (cType === 'msi' ? 'amber' : 'muted') as 'amber' | 'muted',
+          badgeColor: (isMsi ? 'amber' : 'muted') as 'amber' | 'muted',
           projected: true,
           commitment: c,
         }]
       }
 
-      // Fortnight: show on 15th and last day
+      // Fortnight: show only the NEXT upcoming payment date (not all future)
       const fortnightDates = [
         `${ay}-${pad2(am + 1)}-15`,
         `${ay}-${pad2(am + 1)}-${pad2(lastDay)}`,
       ]
 
-      return fortnightDates
-        .filter((d) => {
-          if (d < c.start_date) return false
-          if (c.end_date && d > c.end_date) return false
-          return true
-        })
-        .map((d, i) => ({
-          id: `c-${c.id}-${am}-${i}`,
-          kind: 'commitment' as const,
-          date: d,
-          label: c.name,
-          subtitle: cType === 'savings_goal' ? 'meta' : 'ahorro',
-          amount: c.amount,
-          type: 'expense' as const,
-          badge: 'ahorro',
-          badgeColor: 'positive' as const,
-          projected: true,
-          commitment: c,
-        }))
+      const nextDate = fortnightDates.find((d) => {
+        if (d < todayStr) return false
+        if (d < c.start_date) return false
+        if (c.end_date && d > c.end_date) return false
+        return true
+      })
+
+      if (!nextDate) return []
+
+      return [{
+        id: `c-${c.id}-${am}`,
+        kind: 'commitment' as const,
+        date: nextDate,
+        label: c.name,
+        subtitle: cType === 'savings_goal' ? 'meta' : 'ahorro',
+        amount: c.amount,
+        type: 'expense' as const,
+        badge: 'ahorro',
+        badgeColor: 'positive' as const,
+        projected: true,
+        commitment: c,
+      }]
     })
 
     return [...txEntries, ...commitmentEntries]
@@ -311,10 +320,17 @@ export default function HomePage() {
     const yesterdayEntries = logEntries.filter((e) => e.date === yesterdayStr)
     const past = logEntries.filter((e) => e.date < yesterdayStr).sort((a, b) => b.date.localeCompare(a.date))
 
-    const groups: { label: string; entries: LogEntry[] }[] = []
+    // Calculate daily net for section headers
+    const dailyNet = (entries: LogEntry[]): number =>
+      entries.reduce((sum, e) => {
+        if (e.projected) return sum
+        return sum + (e.type === 'income' ? e.amount : -e.amount)
+      }, 0)
+
+    const groups: { label: string; entries: LogEntry[]; net?: number }[] = []
     if (future.length > 0) groups.push({ label: 'Próximos', entries: future })
-    if (todayEntries.length > 0) groups.push({ label: `Hoy · ${formatSectionDate(todayStr)}`, entries: todayEntries })
-    if (yesterdayEntries.length > 0) groups.push({ label: `Ayer · ${formatSectionDate(yesterdayStr)}`, entries: yesterdayEntries })
+    if (todayEntries.length > 0) groups.push({ label: `Hoy · ${formatSectionDate(todayStr)}`, entries: todayEntries, net: dailyNet(todayEntries) })
+    if (yesterdayEntries.length > 0) groups.push({ label: `Ayer · ${formatSectionDate(yesterdayStr)}`, entries: yesterdayEntries, net: dailyNet(yesterdayEntries) })
 
     const byDate = new Map<string, LogEntry[]>()
     for (const e of past) {
@@ -322,7 +338,7 @@ export default function HomePage() {
       arr.push(e)
       byDate.set(e.date, arr)
     }
-    for (const [date, entries] of byDate) groups.push({ label: formatSectionDate(date), entries })
+    for (const [date, entries] of byDate) groups.push({ label: formatSectionDate(date), entries, net: dailyNet(entries) })
 
     return groups
   }, [logEntries, todayStr])
@@ -352,16 +368,6 @@ export default function HomePage() {
     return sum
   }, 0)
 
-  // Breakdown for snapshot
-  const fixedDeduction = activeCommitments
-    .filter((c) => c.frequency === 'monthly' && getCommitmentType(c) === 'fixed')
-    .reduce((sum, c) => sum + c.amount / 2, 0)
-  const msiDeduction = activeCommitments
-    .filter((c) => getCommitmentType(c) === 'msi')
-    .reduce((sum, c) => sum + c.amount / 2, 0)
-  const savingsDeduction = activeCommitments
-    .filter((c) => c.frequency === 'fortnight')
-    .reduce((sum, c) => sum + c.amount, 0)
 
   const ingresado = lastQuincenaIncome?.amount ?? 0
   const committedThisFortnight = fortnightDeduction
@@ -375,25 +381,15 @@ export default function HomePage() {
   const dailyBudget = hasIncome && daysRemaining > 0 ? freeThisFortnight / daysRemaining : 0
 
   const spentThisPeriod = gastado
-  const burnPct = ingresado > 0 ? spentThisPeriod / ingresado : 0
+  const totalSpendable = freeThisFortnight + gastado
+  const burnPct = totalSpendable > 0 ? spentThisPeriod / totalSpendable : 0
   const timePct = progress
 
   let burnColor = '#f59e0b'
   if (burnPct < timePct - 0.1) burnColor = '#16a34a'
   else if (burnPct > timePct + 0.1) burnColor = '#dc2626'
 
-  const historicalAvgDaily = useMemo(() => {
-    if (!periodStartStr) return null
-    const prevExpenses = transactions.filter((t) => t.type === 'expense' && t.date < periodStartStr)
-    if (prevExpenses.length === 0) return null
-    const total = prevExpenses.reduce((sum, t) => sum + t.amount, 0)
-    const earliest = prevExpenses.reduce((min, t) => (t.date < min ? t.date : min), prevExpenses[0].date)
-    const days = Math.max(Math.ceil((new Date(periodStartStr + 'T12:00:00').getTime() - new Date(earliest + 'T12:00:00').getTime()) / 86400000), 1)
-    return total / days
-  }, [transactions, periodStartStr])
-
   const isEndOfFortnight = hasIncome && daysRemaining <= 3
-  const hasMultipleCategories = [fixedDeduction, msiDeduction, savingsDeduction].filter((v) => v > 0).length > 1
 
   const today = new Date()
   const dateStr = today.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' })
@@ -442,34 +438,11 @@ export default function HomePage() {
               <span>Ingresado</span>
               <span>{formatMoney(ingresado)}</span>
             </div>
-            <div className="flex justify-between text-xs text-[var(--text-muted)] mb-0.5">
+            <div className="flex justify-between text-xs text-[var(--text-muted)]">
               <span>Comprometido</span>
               <span>{formatMoney(committedThisFortnight)}</span>
             </div>
-            {hasMultipleCategories && (
-              <div className="ml-3 mb-0.5">
-                {fixedDeduction > 0 && (
-                  <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
-                    <span>Gastos fijos</span><span>{formatMoney(fixedDeduction)}</span>
-                  </div>
-                )}
-                {msiDeduction > 0 && (
-                  <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
-                    <span>MSI</span><span>{formatMoney(msiDeduction)}</span>
-                  </div>
-                )}
-                {savingsDeduction > 0 && (
-                  <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
-                    <span>Metas</span><span>{formatMoney(savingsDeduction)}</span>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="h-px bg-[var(--border-color)] my-1.5" />
-            <div className="flex justify-between text-xs">
-              <span className="text-[var(--text-secondary)] font-medium">Libre</span>
-              <span className="text-[var(--text-secondary)] font-medium">{formatMoney(freeThisFortnight)}</span>
-            </div>
+            <div className="h-px bg-[var(--border-color)] mt-1.5" />
           </div>
 
           {isEndOfFortnight && (
@@ -484,11 +457,8 @@ export default function HomePage() {
             </div>
             <div className="flex justify-between mt-1.5">
               <span className="text-[11px] text-[var(--text-muted)]">Gastado {formatMoney(spentThisPeriod)}</span>
-              <span className="text-[11px] text-[var(--text-muted)]">Libre {formatMoney(freeThisFortnight)}</span>
+              <span className="text-[11px] text-[var(--text-muted)]">Disponible {formatMoney(freeThisFortnight)}</span>
             </div>
-            {historicalAvgDaily !== null && (
-              <p className="text-[11px] text-[var(--text-muted)] mt-1.5">Promedio histórico: {formatMoney(historicalAvgDaily)}/día</p>
-            )}
           </div>
         </>
       )}
@@ -506,15 +476,17 @@ export default function HomePage() {
           <button onClick={() => setActiveMonth(prev)} className="p-2 text-[var(--text-muted)]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-center gap-1">
             {!isCurrentMonth && (
               <button onClick={goToToday} className="text-[10px] font-medium text-positive px-2 py-0.5 rounded-full" style={{ border: '0.5px solid rgba(22, 163, 74, 0.4)' }}>Hoy</button>
             )}
-            <button onClick={() => setActiveMonth(prev)} className="px-3 py-1 rounded-full text-xs font-medium text-[var(--text-muted)]">{MONTHS_SHORT[prev.month]}</button>
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--bg-secondary)] text-[var(--text-primary)]">
-              {MONTHS_SHORT[activeMonth.month]} {activeMonth.year !== today.getFullYear() ? activeMonth.year : ''}
-            </span>
-            <button onClick={() => setActiveMonth(next)} className="px-3 py-1 rounded-full text-xs font-medium text-[var(--text-muted)]">{MONTHS_SHORT[next.month]}</button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setActiveMonth(prev)} className="px-3 py-1 rounded-full text-xs font-medium text-[var(--text-muted)]">{MONTHS_SHORT[prev.month]}</button>
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--bg-secondary)] text-[var(--text-primary)]">
+                {MONTHS_SHORT[activeMonth.month]} {activeMonth.year !== today.getFullYear() ? activeMonth.year : ''}
+              </span>
+              <button onClick={() => setActiveMonth(next)} className="px-3 py-1 rounded-full text-xs font-medium text-[var(--text-muted)]">{MONTHS_SHORT[next.month]}</button>
+            </div>
           </div>
           <button onClick={() => setActiveMonth(next)} className="p-2 text-[var(--text-muted)]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
@@ -531,7 +503,14 @@ export default function HomePage() {
             const isTodaySection = section.label.startsWith('Hoy')
             return (
               <div key={section.label} className="mb-4" ref={isTodaySection ? todaySectionRef : undefined}>
-                <p className="text-[10px] font-medium uppercase mb-2" style={{ letterSpacing: '2px', color: 'var(--section-label)' }}>{section.label}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-medium uppercase" style={{ letterSpacing: '2px', color: 'var(--section-label)' }}>{section.label}</p>
+                  {section.net !== undefined && section.net !== 0 && (
+                    <span className={`text-[11px] ${section.net < 0 ? 'text-negative/60' : 'text-positive/60'}`}>
+                      {section.net < 0 ? '−' : '+'}${Math.abs(section.net).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  )}
+                </div>
                 <div className="space-y-1.5">
                   {section.entries.map((entry) => {
                     const isTransaction = entry.kind === 'transaction'
