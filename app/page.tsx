@@ -98,6 +98,7 @@ export default function HomePage() {
   const [nameInput, setNameInput] = useState('')
   const nameInputRef = useRef<HTMLInputElement>(null)
 
+  const [proximosOpen, setProximosOpen] = useState(false)
   const [confirmingCommitment, setConfirmingCommitment] = useState<Commitment | null>(null)
   const [confirmNote, setConfirmNote] = useState('')
   const [confirmDate, setConfirmDate] = useState('')
@@ -330,29 +331,30 @@ export default function HomePage() {
       }]
     })
 
-    return [...txEntries, ...commitmentEntries]
+    return { txEntries, commitmentEntries }
   }, [transactions, commitments, activeMonth, todayStr])
 
-  // ─── Group entries ───
+  // Projected commitments — separate list, shown in collapsible section
+  const projectedEntries = useMemo(() =>
+    logEntries.commitmentEntries.sort((a, b) => a.date.localeCompare(b.date)),
+    [logEntries]
+  )
+
+  // ─── Group real transactions by day ───
   const sections = useMemo(() => {
+    const real = logEntries.txEntries
     const yesterdayDate = new Date()
     yesterdayDate.setDate(yesterdayDate.getDate() - 1)
     const yesterdayStr = getLocalDateString(yesterdayDate)
 
-    const future = logEntries.filter((e) => e.date > todayStr).sort((a, b) => a.date.localeCompare(b.date))
-    const todayEntries = logEntries.filter((e) => e.date === todayStr)
-    const yesterdayEntries = logEntries.filter((e) => e.date === yesterdayStr)
-    const past = logEntries.filter((e) => e.date < yesterdayStr).sort((a, b) => b.date.localeCompare(a.date))
+    const todayEntries = real.filter((e) => e.date === todayStr)
+    const yesterdayEntries = real.filter((e) => e.date === yesterdayStr)
+    const past = real.filter((e) => e.date < yesterdayStr).sort((a, b) => b.date.localeCompare(a.date))
 
-    // Calculate daily net for section headers
     const dailyNet = (entries: LogEntry[]): number =>
-      entries.reduce((sum, e) => {
-        if (e.projected) return sum
-        return sum + (e.type === 'income' ? e.amount : -e.amount)
-      }, 0)
+      entries.reduce((sum, e) => sum + (e.type === 'income' ? e.amount : -e.amount), 0)
 
     const groups: { label: string; entries: LogEntry[]; net?: number }[] = []
-    if (future.length > 0) groups.push({ label: 'Próximos', entries: future })
     if (todayEntries.length > 0) groups.push({ label: `Hoy · ${formatSectionDate(todayStr)}`, entries: todayEntries, net: dailyNet(todayEntries) })
     if (yesterdayEntries.length > 0) groups.push({ label: `Ayer · ${formatSectionDate(yesterdayStr)}`, entries: yesterdayEntries, net: dailyNet(yesterdayEntries) })
 
@@ -578,7 +580,7 @@ export default function HomePage() {
 
         <div className="flex-1 overflow-y-auto min-h-0 -mx-4 px-4" style={{ paddingBottom: '16px' }}>
           {loading && <TransactionListSkeleton />}
-          {!loading && sections.length === 0 && (
+          {!loading && sections.length === 0 && projectedEntries.length === 0 && (
             <p className="text-center text-[var(--text-muted)] text-sm py-8">Sin movimientos en {MONTHS_SHORT[activeMonth.month]}</p>
           )}
 
@@ -595,23 +597,70 @@ export default function HomePage() {
                   )}
                 </div>
                 <div className="space-y-1.5">
-                  {section.entries.map((entry) => {
-                    const isTransaction = entry.kind === 'transaction'
-                    const isSavings = entry.commitmentKind === 'savings'
-                    const needsConfirm = entry.commitmentKind === 'msi' || entry.commitmentKind === 'fixed'
-
-                    const rowContent = (
-                      <div className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]" style={{ opacity: isSavings ? 0.5 : entry.projected && !needsConfirm ? 0.5 : 1 }}>
-                        {isSavings ? (
-                          <span className="text-sm shrink-0">🏦</span>
-                        ) : entry.projected ? (
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ border: '1.5px dashed var(--text-muted)' }} />
-                        ) : (
-                          <span className={`w-2 h-2 rounded-full shrink-0 ${entry.type === 'income' ? 'bg-positive' : 'bg-negative'}`} />
-                        )}
+                  {section.entries.map((entry) => (
+                    <SwipeableRow key={entry.id} onEdit={() => setEditingTransaction(entry.transaction!)} onDelete={() => deleteTransaction(entry.transaction!.id)}>
+                      <div className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${entry.type === 'income' ? 'bg-positive' : 'bg-negative'}`} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             {entry.transaction?.is_extraordinary && <span className="text-[11px] opacity-40">⚡</span>}
+                            {entry.emoji && <span className="text-sm">{entry.emoji}</span>}
+                            <p className="text-sm font-medium truncate">{entry.label}</p>
+                          </div>
+                          {entry.subtitle && <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{entry.subtitle}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`font-semibold text-sm ${entry.type === 'income' ? 'text-positive' : 'text-negative'}`}>
+                            {entry.type === 'income' ? '+' : '−'}${entry.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                          </span>
+                          <span className="text-[11px] text-[var(--text-muted)] w-11 text-right">{formatEntryDate(entry.date)}</span>
+                        </div>
+                      </div>
+                    </SwipeableRow>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+
+          {/* ─── Próximos: collapsible projected commitments ─── */}
+          {projectedEntries.length > 0 && (
+            <div className="mb-4">
+              <button
+                className="flex items-center justify-between w-full mb-2"
+                onClick={() => setProximosOpen(!proximosOpen)}
+              >
+                <p className="text-[10px] font-medium uppercase" style={{ letterSpacing: '2px', color: 'var(--section-label)' }}>Próximos</p>
+                <div className="flex items-center gap-1.5">
+                  {!proximosOpen && (
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      {projectedEntries.length} {projectedEntries.length === 1 ? 'compromiso' : 'compromisos'}
+                    </span>
+                  )}
+                  <svg
+                    width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className="text-[var(--text-muted)] transition-transform"
+                    style={{ transform: proximosOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </div>
+              </button>
+              {proximosOpen && (
+                <div className="space-y-1.5">
+                  {projectedEntries.map((entry) => {
+                    const isSavings = entry.commitmentKind === 'savings'
+                    const needsConfirm = entry.commitmentKind === 'msi' || entry.commitmentKind === 'fixed'
+
+                    return (
+                      <div key={entry.id} className="flex items-center gap-3 p-3 rounded-btn bg-[var(--bg-secondary)]" style={{ opacity: isSavings ? 0.5 : 1 }}>
+                        {isSavings ? (
+                          <span className="text-sm shrink-0">🏦</span>
+                        ) : (
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ border: '1.5px dashed var(--text-muted)' }} />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
                             {entry.emoji && <span className="text-sm">{entry.emoji}</span>}
                             <p className="text-sm font-medium truncate">{entry.label}</p>
                             {entry.badge && (
@@ -635,27 +684,18 @@ export default function HomePage() {
                               onClick={(e) => { e.stopPropagation(); setConfirmingCommitment(entry.commitment!); setConfirmDate(getLocalDateString()); setConfirmNote('') }}
                             >✓ Confirmar</button>
                           )}
-                          <span className={`font-semibold text-sm ${entry.type === 'income' ? 'text-positive' : entry.projected ? 'text-[var(--text-secondary)]' : 'text-negative'}`}>
-                            {entry.type === 'income' ? '+' : '−'}${entry.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                          <span className="font-semibold text-sm text-[var(--text-secondary)]">
+                            −${entry.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                           </span>
                           <span className="text-[11px] text-[var(--text-muted)] w-11 text-right">{formatEntryDate(entry.date)}</span>
                         </div>
                       </div>
                     )
-
-                    if (isTransaction) {
-                      return (
-                        <SwipeableRow key={entry.id} onEdit={() => setEditingTransaction(entry.transaction!)} onDelete={() => deleteTransaction(entry.transaction!.id)}>
-                          {rowContent}
-                        </SwipeableRow>
-                      )
-                    }
-                    return <div key={entry.id}>{rowContent}</div>
                   })}
                 </div>
-              </div>
-            )
-          })}
+              )}
+            </div>
+          )}
         </div>
       </div>
 
