@@ -158,6 +158,7 @@ export default function CompromisosPage() {
     } else if (endType === 'date') {
       endDate = wizardEndDate || null
     } else if (endType === 'goal') {
+      // Step 2 = per-fortnight contribution, Step 3 "Al juntar X" = total goal
       goalAmount = parseFloat(wizardGoalAmount) || null
     }
 
@@ -165,6 +166,8 @@ export default function CompromisosPage() {
       dayOfMonth = new Date().getDate()
     }
 
+    // For goal-type: amount = per-period contribution (step 2),
+    // goal_amount = total target (step 3). Both stored correctly.
     await createCommitment({
       name: wizardName.trim(),
       amount: amt,
@@ -363,7 +366,8 @@ export default function CompromisosPage() {
             {/* Step 2: Amount + Frequency */}
             {wizardStep === 2 && (
               <div>
-                <h2 className="text-lg font-bold mb-4">{wizardName}</h2>
+                <h2 className="text-lg font-bold mb-2">{wizardName}</h2>
+                <p className="text-xs text-[var(--text-muted)] text-center mb-4">¿Cuánto apartas cada periodo?</p>
 
                 <div className="flex items-center justify-center mb-4">
                   <span className="text-3xl font-bold mr-1">$</span>

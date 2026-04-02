@@ -291,13 +291,17 @@ export default function HomePage() {
 
       if (!nextDate) return []
 
+      // Use the per-fortnight contribution, not goal amount
+      const projectedAmount = (cType === 'savings_goal' && c.goal_amount && c.amount > c.goal_amount)
+        ? c.goal_amount : c.amount
+
       return [{
         id: `c-${c.id}-${am}`,
         kind: 'commitment' as const,
         date: nextDate,
         label: c.name,
         subtitle: cType === 'savings_goal' ? 'meta' : 'ahorro',
-        amount: c.amount,
+        amount: projectedAmount,
         type: 'expense' as const,
         badge: 'ahorro',
         badgeColor: 'positive' as const,
@@ -362,11 +366,21 @@ export default function HomePage() {
   // Per-fortnight deductions from active commitments
   const activeCommitments = commitments.filter((c) => !c.completed_at)
 
-  const fortnightDeduction = activeCommitments.reduce((sum, c) => {
-    if (c.frequency === 'fortnight') return sum + c.amount
-    if (c.frequency === 'monthly') return sum + c.amount / 2
-    return sum
-  }, 0)
+  // Per-fortnight contribution for each active commitment.
+  // For goal-type: if amount > goal_amount, the fields are swapped in the DB —
+  // use the smaller value as the periodic contribution.
+  const getPerFortnight = (c: Commitment): number => {
+    if (c.frequency === 'fortnight') {
+      if (c.end_type === 'goal' && c.goal_amount && c.amount > c.goal_amount) {
+        return c.goal_amount // fields were swapped — goal_amount is actually the contribution
+      }
+      return c.amount
+    }
+    if (c.frequency === 'monthly') return c.amount / 2
+    return 0
+  }
+
+  const fortnightDeduction = activeCommitments.reduce((sum, c) => sum + getPerFortnight(c), 0)
 
 
   const ingresado = lastQuincenaIncome?.amount ?? 0
