@@ -91,6 +91,13 @@ function isInMonth(dateStr: string, month: number, year: number): boolean {
   return d.getMonth() === month && d.getFullYear() === year
 }
 
+function isPaidThisMonth(date: string | null): boolean {
+  if (!date) return false
+  const d = new Date(date + 'T12:00:00')
+  const now = new Date()
+  return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+}
+
 export default function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
@@ -335,7 +342,11 @@ export default function HomePage() {
       }
       return c.amount
     }
-    if (c.frequency === 'monthly') return c.amount / 2
+    if (c.frequency === 'monthly') {
+      // If already paid this month, don't deduct from this fortnight
+      if (isPaidThisMonth(c.last_paid_date)) return 0
+      return c.amount / 2
+    }
     return 0
   }
 
