@@ -4,13 +4,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { getLocalDateString } from '@/lib/date'
-import { detectPlatform } from '@/lib/utils'
 import { useTransactions } from '@/hooks/useTransactions'
 import { useCommitments } from '@/hooks/useCommitments'
 import { useBudgets } from '@/hooks/useBudgets'
 import { usePayday } from '@/hooks/usePayday'
+import { useConfirmCommitmentPayment } from '@/hooks/useConfirmCommitmentPayment'
 import TransactionModal from '@/components/modals/TransactionModal'
 import EditTransactionModal from '@/components/modals/EditTransactionModal'
+import ConfirmCommitmentPaymentModal from '@/components/modals/ConfirmCommitmentPaymentModal'
 import SwipeableRow from '@/components/ui/SwipeableRow'
 import Toast from '@/components/ui/Toast'
 import type { Transaction, Commitment } from '@/types'
@@ -100,9 +101,6 @@ export default function HomePage() {
 
   const [proximosOpen, setProximosOpen] = useState(false)
   const [confirmingCommitment, setConfirmingCommitment] = useState<Commitment | null>(null)
-  const [confirmNote, setConfirmNote] = useState('')
-  const [confirmDate, setConfirmDate] = useState('')
-  const [confirmSaving, setConfirmSaving] = useState(false)
 
   const now = new Date()
   const [activeMonth, setActiveMonth] = useState({
@@ -115,8 +113,9 @@ export default function HomePage() {
     createTransaction, updateTransaction, deleteTransaction,
     daysSinceLastIncome, toastMsg, clearToast,
   } = useTransactions()
-  const { commitments, updateCommitment } = useCommitments()
+  const { commitments } = useCommitments()
   const { budgets } = useBudgets()
+  const confirmPayment = useConfirmCommitmentPayment()
 
   const lastIncomeDate = useMemo(() => {
     const income = transactions.find((t) => t.type === 'income')
@@ -150,68 +149,6 @@ export default function HomePage() {
   const handleNameKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') saveName()
     if (e.key === 'Escape') setEditingName(false)
-  }
-
-  // ─── Confirm payment handler ───
-  const handleConfirmPayment = async () => {
-    if (!confirmingCommitment) return
-    setConfirmSaving(true)
-
-    const selectedDate = confirmDate || getLocalDateString()
-    const dateObj = new Date(selectedDate + 'T12:00:00')
-    const nowTime = new Date()
-
-    // Use commitment's category, or null (user can assign later)
-    const txCategoryId = confirmingCommitment.category_id
-
-    const transaction: Omit<Transaction, 'id' | 'created_at' | 'user_id' | 'category'> = {
-      type: 'expense',
-      category_id: txCategoryId,
-      amount: confirmingCommitment.amount,
-      note: confirmNote.trim() || `Pago: ${confirmingCommitment.name}`,
-      rating: null,
-      date: selectedDate,
-      weekday: dateObj.getDay(),
-      hour: nowTime.getHours(),
-      is_weekend: dateObj.getDay() === 0 || dateObj.getDay() === 6,
-      fortnight: currentFortnight,
-      geo_lat: null, geo_lng: null, geo_accuracy: null,
-      platform: detectPlatform(),
-      source: 'manual',
-      entry_seconds: 0, category_changes: 0,
-      had_note: confirmNote.trim().length > 0,
-      balance_before: currentBalance,
-      balance_after: currentBalance - confirmingCommitment.amount,
-      days_since_last_income: daysSinceLastIncome,
-      days_until_next_payday: daysRemaining,
-      is_commitment_payment: true,
-    }
-
-    await createTransaction(transaction)
-
-    const cType = getCommitmentType(confirmingCommitment)
-    const updates: Partial<Commitment> = { last_paid_date: selectedDate }
-
-    if (cType === 'msi') {
-      const newPaid = (confirmingCommitment.paid_installments || 0) + 1
-      const total = confirmingCommitment.total_installments || 0
-      updates.paid_installments = newPaid
-      if (newPaid >= total) {
-        updates.completed_at = new Date().toISOString()
-      }
-    } else if (cType === 'savings_goal' || cType === 'seasonal' || cType === 'recurring_savings') {
-      updates.current_amount = (confirmingCommitment.current_amount || 0) + confirmingCommitment.amount
-      if (confirmingCommitment.goal_amount && updates.current_amount >= confirmingCommitment.goal_amount) {
-        updates.completed_at = new Date().toISOString()
-      }
-    }
-
-    await updateCommitment(confirmingCommitment.id, updates)
-
-    setConfirmSaving(false)
-    setConfirmingCommitment(null)
-    setConfirmNote('')
-    setConfirmDate('')
   }
 
   // ─── Build log entries ───
@@ -681,7 +618,7 @@ export default function HomePage() {
                             <button
                               className="text-[10px] font-semibold text-positive px-2 py-1 rounded-btn"
                               style={{ border: '0.5px solid rgba(22, 163, 74, 0.3)' }}
-                              onClick={(e) => { e.stopPropagation(); setConfirmingCommitment(entry.commitment!); setConfirmDate(getLocalDateString()); setConfirmNote('') }}
+                              onClick={(e) => { e.stopPropagation(); setConfirmingCommitment(entry.commitment!) }}
                             >✓ Confirmar</button>
                           )}
                           <span className="font-semibold text-sm text-[var(--text-secondary)]">
@@ -699,27 +636,11 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Confirm Payment Modal */}
-      {confirmingCommitment && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setConfirmingCommitment(null)} />
-          <div className="relative w-full max-w-app bg-[var(--bg-card)] rounded-t-[24px] p-6 pb-8 animate-slide-up">
-            <h2 className="text-lg font-bold mb-1">¿Confirmar pago?</h2>
-            <p className="text-sm text-[var(--text-secondary)] mb-4">{confirmingCommitment.name}</p>
-            <div className="flex items-center justify-center mb-4">
-              <span className="text-3xl font-bold">{formatMoney(confirmingCommitment.amount)}</span>
-            </div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Fecha</label>
-            <input type="date" value={confirmDate} onChange={(e) => setConfirmDate(e.target.value)} max={getLocalDateString()} className="input-field mb-3" />
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Nota (opcional)</label>
-            <input type="text" value={confirmNote} onChange={(e) => setConfirmNote(e.target.value)} placeholder={`Pago: ${confirmingCommitment.name}`} className="input-field mb-4" />
-            <div className="flex gap-3">
-              <Button variant="secondary" onClick={() => setConfirmingCommitment(null)}>Cancelar</Button>
-              <Button fullWidth disabled={confirmSaving} onClick={handleConfirmPayment}>{confirmSaving ? 'Guardando...' : 'Confirmar pago'}</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmCommitmentPaymentModal
+        commitment={confirmingCommitment}
+        onClose={() => setConfirmingCommitment(null)}
+        onConfirm={confirmPayment}
+      />
 
       <EditTransactionModal transaction={editingTransaction} onClose={() => setEditingTransaction(null)} onUpdate={updateTransaction} onDelete={deleteTransaction} />
 

@@ -4,10 +4,12 @@ import { useState, useMemo } from 'react'
 import { useCommitments } from '@/hooks/useCommitments'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePayday } from '@/hooks/usePayday'
+import { useConfirmCommitmentPayment } from '@/hooks/useConfirmCommitmentPayment'
 import SwipeableRow from '@/components/ui/SwipeableRow'
 import Toast from '@/components/ui/Toast'
 import ProgressBar from '@/components/ui/ProgressBar'
 import Button from '@/components/ui/Button'
+import ConfirmCommitmentPaymentModal from '@/components/modals/ConfirmCommitmentPaymentModal'
 import { getLocalDateString } from '@/lib/date'
 import { calculatePlanContribution } from '@/lib/calculations'
 import type { Commitment } from '@/types'
@@ -53,6 +55,7 @@ export default function CompromisosPage() {
     clearToast,
   } = useCommitments()
   const { transactions, currentBalance } = useTransactions()
+  const confirmPayment = useConfirmCommitmentPayment()
 
   const lastIncomeDate = useMemo(() => {
     const income = transactions.find((t) => t.type === 'income')
@@ -60,6 +63,16 @@ export default function CompromisosPage() {
   }, [transactions])
 
   const { daysRemaining, nextPayday } = usePayday(lastIncomeDate)
+
+  // ─── Confirm payment state ───
+  const [confirmingPayment, setConfirmingPayment] = useState<Commitment | null>(null)
+
+  const isPaidThisMonth = (c: Commitment): boolean => {
+    if (!c.last_paid_date) return false
+    const d = new Date(c.last_paid_date + 'T12:00:00')
+    const now = new Date()
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+  }
 
   // ─── Wizard state ───
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -241,6 +254,7 @@ export default function CompromisosPage() {
             const total = c.total_installments || 1
             const paid = c.paid_installments || 0
             const msiProgress = isMsi ? Math.min(paid / total, 1) : 0
+            const alreadyPaid = isPaidThisMonth(c)
 
             return (
               <SwipeableRow key={c.id} onEdit={() => openEdit(c)} onDelete={() => deleteCommitment(c.id)}>
@@ -272,6 +286,25 @@ export default function CompromisosPage() {
                       })()}
                     </>
                   )}
+                  <div className="mt-3 flex justify-end">
+                    {alreadyPaid ? (
+                      <button
+                        disabled
+                        className="text-[10px] font-medium text-[var(--text-muted)] px-2 py-1 rounded-btn opacity-60"
+                        style={{ border: '0.5px solid var(--border-color)' }}
+                      >
+                        Ya pagado este mes
+                      </button>
+                    ) : (
+                      <button
+                        className="text-[10px] font-semibold text-positive px-2 py-1 rounded-btn"
+                        style={{ border: '0.5px solid rgba(22, 163, 74, 0.3)' }}
+                        onClick={(e) => { e.stopPropagation(); setConfirmingPayment(c) }}
+                      >
+                        ✓ Registrar pago
+                      </button>
+                    )}
+                  </div>
                 </div>
               </SwipeableRow>
             )
@@ -565,6 +598,12 @@ export default function CompromisosPage() {
           </div>
         </div>
       )}
+
+      <ConfirmCommitmentPaymentModal
+        commitment={confirmingPayment}
+        onClose={() => setConfirmingPayment(null)}
+        onConfirm={confirmPayment}
+      />
 
       <Toast message={toastMsg} visible={!!toastMsg} onHide={clearToast} />
     </div>
