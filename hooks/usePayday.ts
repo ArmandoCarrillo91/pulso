@@ -26,6 +26,38 @@ function getPaydaysForMonth(year: number, month: number): [Date, Date] {
 }
 
 /**
+ * The payday (15th or last business day of the month) closest in time to
+ * the given date — in either direction. Used to decide which fortnight an
+ * income transaction belongs to when deposits arrive slightly before or
+ * after the nominal payday.
+ */
+export function getNearestPayday(dateStr: string): Date {
+  const d = new Date(dateStr + 'T12:00:00')
+  d.setHours(0, 0, 0, 0)
+  const y = d.getFullYear()
+  const m = d.getMonth()
+  const prevM = m === 0 ? 11 : m - 1
+  const prevY = m === 0 ? y - 1 : y
+  const nextM = m === 11 ? 0 : m + 1
+  const nextY = m === 11 ? y + 1 : y
+  const candidates: Date[] = [
+    ...getPaydaysForMonth(prevY, prevM),
+    ...getPaydaysForMonth(y, m),
+    ...getPaydaysForMonth(nextY, nextM),
+  ]
+  let best = candidates[0]
+  let bestDist = Math.abs(d.getTime() - best.getTime())
+  for (const c of candidates) {
+    const dist = Math.abs(d.getTime() - c.getTime())
+    if (dist < bestDist) {
+      bestDist = dist
+      best = c
+    }
+  }
+  return best
+}
+
+/**
  * Start of the current fortnight: the most recent payday (15th or last
  * business day of the month) on or before today.
  */

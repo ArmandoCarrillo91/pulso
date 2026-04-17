@@ -7,7 +7,7 @@ import { getLocalDateString } from '@/lib/date'
 import { useTransactions } from '@/hooks/useTransactions'
 import { useCommitments } from '@/hooks/useCommitments'
 import { useBudgets } from '@/hooks/useBudgets'
-import { usePayday, getCurrentFortnightStart } from '@/hooks/usePayday'
+import { usePayday, getNearestPayday } from '@/hooks/usePayday'
 import { useConfirmCommitmentPayment } from '@/hooks/useConfirmCommitmentPayment'
 import TransactionModal from '@/components/modals/TransactionModal'
 import EditTransactionModal from '@/components/modals/EditTransactionModal'
@@ -125,10 +125,15 @@ export default function HomePage() {
   const confirmPayment = useConfirmCommitmentPayment()
 
   const lastQuincenaIncome = useMemo(() => {
-    const windowStart = getCurrentFortnightStart()
-    const windowStartStr = `${windowStart.getFullYear()}-${pad2(windowStart.getMonth() + 1)}-${pad2(windowStart.getDate())}`
-    return transactions
-      .filter((t) => t.type === 'income' && t.date >= windowStartStr)
+    const incomes = transactions.filter((t) => t.type === 'income')
+    if (incomes.length === 0) return null
+    // Anchor to the fortnight that contains the most recent income. Each
+    // income belongs to the fortnight whose payday is closest in calendar
+    // time — this tolerates deposits that land a day or two before the
+    // nominal 15th / last-business-day.
+    const anchor = getNearestPayday(incomes[0].date).getTime()
+    return incomes
+      .filter((t) => getNearestPayday(t.date).getTime() === anchor)
       .reduce<Transaction | null>((max, t) => (!max || t.amount > max.amount ? t : max), null)
   }, [transactions])
   const lastIncomeDate = lastQuincenaIncome?.date ?? null
