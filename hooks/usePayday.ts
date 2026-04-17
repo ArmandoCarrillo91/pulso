@@ -26,6 +26,24 @@ function getPaydaysForMonth(year: number, month: number): [Date, Date] {
 }
 
 /**
+ * Start of the current fortnight: the most recent payday (15th or last
+ * business day of the month) on or before today.
+ */
+export function getCurrentFortnightStart(today: Date = new Date()): Date {
+  const d = new Date(today)
+  d.setHours(0, 0, 0, 0)
+  const y = d.getFullYear()
+  const m = d.getMonth()
+  const [first, second] = getPaydaysForMonth(y, m)
+  if (d >= second) return second
+  if (d >= first) return first
+  const prevM = m === 0 ? 11 : m - 1
+  const prevY = m === 0 ? y - 1 : y
+  const [, prevSecond] = getPaydaysForMonth(prevY, prevM)
+  return prevSecond
+}
+
+/**
  * Get the next payday after a given date.
  */
 function getNextPaydayAfter(date: Date): Date {

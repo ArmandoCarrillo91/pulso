@@ -7,7 +7,7 @@ import { getLocalDateString } from '@/lib/date'
 import { useTransactions } from '@/hooks/useTransactions'
 import { useCommitments } from '@/hooks/useCommitments'
 import { useBudgets } from '@/hooks/useBudgets'
-import { usePayday } from '@/hooks/usePayday'
+import { usePayday, getCurrentFortnightStart } from '@/hooks/usePayday'
 import { useConfirmCommitmentPayment } from '@/hooks/useConfirmCommitmentPayment'
 import TransactionModal from '@/components/modals/TransactionModal'
 import EditTransactionModal from '@/components/modals/EditTransactionModal'
@@ -124,10 +124,14 @@ export default function HomePage() {
   const { budgets } = useBudgets()
   const confirmPayment = useConfirmCommitmentPayment()
 
-  const lastIncomeDate = useMemo(() => {
-    const income = transactions.find((t) => t.type === 'income')
-    return income?.date ?? null
+  const lastQuincenaIncome = useMemo(() => {
+    const windowStart = getCurrentFortnightStart()
+    const windowStartStr = `${windowStart.getFullYear()}-${pad2(windowStart.getMonth() + 1)}-${pad2(windowStart.getDate())}`
+    return transactions
+      .filter((t) => t.type === 'income' && t.date >= windowStartStr)
+      .reduce<Transaction | null>((max, t) => (!max || t.amount > max.amount ? t : max), null)
   }, [transactions])
+  const lastIncomeDate = lastQuincenaIncome?.date ?? null
 
   const { daysRemaining, progress, currentFortnight, nextPayday } = usePayday(lastIncomeDate)
 
@@ -325,7 +329,6 @@ export default function HomePage() {
   }
 
   // ─── Income-based period ───
-  const lastQuincenaIncome = useMemo(() => transactions.find((t) => t.type === 'income') ?? null, [transactions])
   const hasIncome = !!lastQuincenaIncome
   const periodStartStr = lastQuincenaIncome?.date ?? null
 
@@ -350,7 +353,11 @@ export default function HomePage() {
     return 0
   }
 
-  const fortnightDeduction = activeCommitments.reduce((sum, c) => sum + getPerFortnight(c), 0)
+  // Apartados (commitments with an initial balance or contribution start date)
+  // are savings buckets — they must not reduce the número grande.
+  const fortnightDeduction = activeCommitments
+    .filter((c) => !((c.initial_balance ?? 0) > 0 || c.balance_start_date != null))
+    .reduce((sum, c) => sum + getPerFortnight(c), 0)
 
 
   const ingresado = lastQuincenaIncome?.amount ?? 0
